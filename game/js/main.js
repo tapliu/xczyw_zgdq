@@ -48,6 +48,17 @@ let combatStats = {}, uidCharMap = {}, uidSideMap = {};
 let terrainMode = 'normal';
 
 // ==================== APPLY STATE FROM SERVER ====================
+function normalizeSide(obj) {
+  if (!obj) return obj;
+  return {
+    collection: obj.collection || [],
+    board: obj.board || Array(64).fill(null),
+    troops: obj.troops || 0,
+    flagIdx: obj.flag_idx ?? obj.flagIdx ?? -1,
+    placed: obj.placed ?? 0,
+  };
+}
+
 function applyStateFromServer(data) {
   const s = data.state || data;
   if (s.game_id) gameId = s.game_id;
@@ -55,8 +66,8 @@ function applyStateFromServer(data) {
   if (s.round !== undefined) round = s.round;
   drawPileCount = s.draw_pile_count ?? s.drawPileCount ?? drawPileCount;
   placedThisTurn = s.placed_this_turn ?? s.placedThisTurn ?? placedThisTurn;
-  if (s.player) player = s.player;
-  if (s.ai) ai = s.ai;
+  if (s.player) player = normalizeSide(s.player);
+  if (s.ai) ai = normalizeSide(s.ai);
   playerCooldowns = s.player_cooldowns ?? s.playerCooldowns ?? playerCooldowns;
   aiCooldowns = s.ai_cooldowns ?? s.aiCooldowns ?? aiCooldowns;
   scatterDebuff = s.scatter_debuff ?? s.scatterDebuff ?? scatterDebuff;

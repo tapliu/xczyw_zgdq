@@ -10,12 +10,13 @@ BOARD_COLS = 8
 PLAYER_ROWS = [4, 5, 6, 7]
 AI_ROWS = [0, 1, 2, 3]
 PLACE_PER_ROUND = 5
-DRAW_PER_ROUND = 3
+DRAW_PER_ROUND = 2
 INIT_DRAW = 10
 INIT_TROOPS = 50000
 MAX_TROOPS_PER_UNIT = 10000
 TROOP_INCOME = 10000
 MAX_TOTAL_TROOPS = 300000
+SPECTATOR_COUNT = 4
 
 def _make_tennozan():
     m = [False] * 64
@@ -228,6 +229,19 @@ class GameState:
                     return True
         return False
 
+    def _is_in_front_of_friendly(self, idx, is_player):
+        r, c = idx // 8, idx % 8
+        board = self.player.board if is_player else self.ai.board
+        if is_player:
+            for rr in range(r + 1, 8):
+                if board[rr * 8 + c]:
+                    return True
+        else:
+            for rr in range(r - 1, -1, -1):
+                if board[rr * 8 + c]:
+                    return True
+        return False
+
     def _pin_from_placement(self, idx, is_player):
         side = self.player if is_player else self.ai
         enemy = self.ai if is_player else self.player
@@ -271,20 +285,28 @@ class GameState:
     def _stat_slot(self, uid):
         if uid not in self.combat_stats:
             self.combat_stats[uid] = {'damage': 0, 'meleeDmg': 0, 'rangedDmg': 0, 'meleeHits': 0, 'rangedHits': 0,
-                                      'kills': 0, 'retreatTriggers': 0}
+                                      'kills': 0, 'retreatTriggers': 0, 'damage_to': {}, 'damage_from': {}}
         return self.combat_stats[uid]
 
-    def _record_melee(self, uid, dmg):
-        s = self._stat_slot(uid)
+    def _record_melee(self, atk_uid, def_uid, dmg):
+        s = self._stat_slot(atk_uid)
         s['damage'] += dmg
         s['meleeDmg'] += dmg
         s['meleeHits'] += 1
+        sk = str(def_uid)
+        s['damage_to'][sk] = s['damage_to'].get(sk, 0) + dmg
+        t = self._stat_slot(def_uid)
+        t['damage_from'][str(atk_uid)] = t['damage_from'].get(str(atk_uid), 0) + dmg
 
-    def _record_ranged(self, uid, dmg):
-        s = self._stat_slot(uid)
+    def _record_ranged(self, atk_uid, def_uid, dmg):
+        s = self._stat_slot(atk_uid)
         s['damage'] += dmg
         s['rangedDmg'] += dmg
         s['rangedHits'] += 1
+        sk = str(def_uid)
+        s['damage_to'][sk] = s['damage_to'].get(sk, 0) + dmg
+        t = self._stat_slot(def_uid)
+        t['damage_from'][str(atk_uid)] = t['damage_from'].get(str(atk_uid), 0) + dmg
 
     def _record_kill(self, uid):
         self._stat_slot(uid)['kills'] += 1
@@ -352,60 +374,146 @@ class GameState:
         self.uid_side_map = {}
         self.battle_log = []
         self.winner = None
-        self._log('点击「抽卡」开始', 'info')
+        self._pending_draw_options = None
+        self.pending_picks = 0
+        self._log('点击「抽卡」开始初始抽卡（10次三选一）', 'info')
 
     def draw_phase(self):
         self._expire_cooldowns()
-        if self.game_phase in ('idle', 'draw'):
-            count = INIT_DRAW if self.round == 0 else DRAW_PER_ROUND
-            if len(self.draw_pile) <= 0:
-                self.round += 1
-                self.placed_this_turn = 0
-                pi = a_inc = 0
-                if self.round > 1:
-                    pi = self._decay_income(self.player)
-                    a_inc = self._decay_income(self.ai)
-                    self.player.troops += pi
-                    self.ai.troops += a_inc
-                self.game_phase = 'place_player'
-                income_str = f'（各获{pi}/{a_inc}兵力）' if self.round > 1 else ''
-                self._log(f'第{self.round}回合 · 牌堆已空，直接放置{income_str}', 'info')
-                return
-
-            actual = min(count, len(self.draw_pile))
-            pc = self.draw_pile[:actual]
-            self.draw_pile = self.draw_pile[actual:]
-            for c in pc:
-                self.player.collection.append(c)
-
-            ac = min(actual, len(self.draw_pile))
-            ac_arr = self.draw_pile[:ac]
-            self.draw_pile = self.draw_pile[ac:]
-            for c in ac_arr:
-                self.ai.collection.append(c)
-
-            if self.round > 0 and len(self.draw_pile) > 0:
-                spec_count = min(2, len(self.draw_pile))
-                spec_arr = self.draw_pile[:spec_count]
-                self.draw_pile = self.draw_pile[spec_count:]
-                for c in spec_arr:
-                    self.spectator_pool.append(c)
-                self._log(f'观战席新增{len(spec_arr)}名武将：{"、".join(c["name"] for c in spec_arr)}', 'info')
-                self._try_recruit_ai()
-
+        if self.game_phase not in ('idle', 'draw'):
+            raise ValueError('不在抽卡阶段')
+        self.pending_picks = 0
+        count = DRAW_PER_ROUND
+        if len(self.draw_pile) <= 0:
             self.round += 1
             self.placed_this_turn = 0
-
             pi = a_inc = 0
             if self.round > 1:
                 pi = self._decay_income(self.player)
                 a_inc = self._decay_income(self.ai)
                 self.player.troops += pi
                 self.ai.troops += a_inc
+            self.game_phase = 'place_player'
+            income_str = f'（各获{pi}/{a_inc}兵力）' if self.round > 1 else ''
+            self._log(f'第{self.round}回合 · 牌堆已空，直接放置{income_str}', 'info')
+            return
 
+        actual = min(count, len(self.draw_pile))
+        pc = self.draw_pile[:actual]
+        self.draw_pile = self.draw_pile[actual:]
+        for c in pc:
+            self.player.collection.append(c)
+
+        ac = min(actual, len(self.draw_pile))
+        ac_arr = self.draw_pile[:ac]
+        self.draw_pile = self.draw_pile[ac:]
+        for c in ac_arr:
+            self.ai.collection.append(c)
+
+        if self.round > 0 and len(self.draw_pile) > 0:
+            spec_count = min(SPECTATOR_COUNT, len(self.draw_pile))
+            spec_arr = self.draw_pile[:spec_count]
+            self.draw_pile = self.draw_pile[spec_count:]
+            for c in spec_arr:
+                self.spectator_pool.append(c)
+            self._log(f'观战席新增{len(spec_arr)}名武将：{"、".join(c["name"] for c in spec_arr)}', 'info')
+            self._try_recruit_ai()
+
+        self.round += 1
+        self.placed_this_turn = 0
+
+        pi = a_inc = 0
+        if self.round > 1:
+            pi = self._decay_income(self.player)
+            a_inc = self._decay_income(self.ai)
+            self.player.troops += pi
+            self.ai.troops += a_inc
+
+        self.game_phase = 'place_player'
+        income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
+        self._log(f'第{self.round}回合 · 抽{len(pc)}张，敌方抽{len(ac_arr)}张{income_str}', 'info')
+
+    def draw_options(self):
+        self._expire_cooldowns()
+        if self.game_phase not in ('idle', 'draw', 'pick_card'):
+            raise ValueError('不在抽卡阶段')
+        if self.pending_picks <= 0:
+            self.pending_picks = INIT_DRAW if self.round == 0 else DRAW_PER_ROUND
+        if len(self.draw_pile) <= 0:
+            self.pending_picks = 0
+            self.draw_phase()
+            return
+        options_count = min(3, len(self.draw_pile))
+        opts = self.draw_pile[:options_count]
+        self.draw_pile = self.draw_pile[options_count:]
+        self._pending_draw_options = opts
+        self.game_phase = 'pick_card'
+
+    def pick_card(self, char_id):
+        if self.game_phase != 'pick_card':
+            raise ValueError('不在选卡阶段')
+        opts = self._pending_draw_options or []
+        selected = next((c for c in opts if c['id'] == char_id), None)
+        if not selected:
+            raise ValueError('无效选择')
+        self._pending_draw_options = None
+        self.player.collection.append(selected)
+        self._log(f'选择了 {selected["name"]}', 'win')
+        unchosen = [c for c in opts if c['id'] != char_id]
+        self.draw_pile.extend(unchosen)
+        self.pending_picks -= 1
+        if self.pending_picks > 0:
+            self.game_phase = 'pick_card'
+            self._log(f'还需选择{self.pending_picks}张', 'info')
+            return
+        if self.round == 0:
+            self._log('初始抽卡完成', 'info')
+            ai_count = min(INIT_DRAW, len(self.draw_pile))
+            ac_arr = self.draw_pile[:ai_count]
+            self.draw_pile = self.draw_pile[ai_count:]
+            for c in ac_arr:
+                self.ai.collection.append(c)
+            if len(self.draw_pile) > 0:
+                spec_count = min(SPECTATOR_COUNT, len(self.draw_pile))
+                spec_arr = self.draw_pile[:spec_count]
+                self.draw_pile = self.draw_pile[spec_count:]
+                for c in spec_arr:
+                    self.spectator_pool.append(c)
+                self._log(f'观战席新增{len(spec_arr)}名武将：{"、".join(c["name"] for c in spec_arr)}', 'info')
+                self._try_recruit_ai()
+            self.round = 1
+            self.placed_this_turn = 0
+            pi = self._decay_income(self.player)
+            a_inc = self._decay_income(self.ai)
+            self.player.troops += pi
+            self.ai.troops += a_inc
+            self.game_phase = 'place_player'
+            self._log(f'第1回合 · 各获{pi}/{a_inc}兵力', 'info')
+        else:
+            ai_count = min(DRAW_PER_ROUND, len(self.draw_pile))
+            ac_arr = self.draw_pile[:ai_count]
+            self.draw_pile = self.draw_pile[ai_count:]
+            for c in ac_arr:
+                self.ai.collection.append(c)
+            if len(self.draw_pile) > 0:
+                spec_count = min(SPECTATOR_COUNT, len(self.draw_pile))
+                spec_arr = self.draw_pile[:spec_count]
+                self.draw_pile = self.draw_pile[spec_count:]
+                for c in spec_arr:
+                    self.spectator_pool.append(c)
+                self._log(f'观战席新增{len(spec_arr)}名武将：{"、".join(c["name"] for c in spec_arr)}', 'info')
+                self._try_recruit_ai()
+            self.round += 1
+            self.placed_this_turn = 0
+            pi = a_inc = 0
+            if self.round > 1:
+                pi = self._decay_income(self.player)
+                a_inc = self._decay_income(self.ai)
+                self.player.troops += pi
+                self.ai.troops += a_inc
             self.game_phase = 'place_player'
             income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
-            self._log(f'第{self.round}回合 · 抽{len(pc)}张，敌方抽{len(ac_arr)}张{income_str}', 'info')
+            self._log(f'第{self.round}回合 · 选{len(ac_arr)}张，敌方抽{len(ac_arr)}张{income_str}', 'info')
 
     def place_unit(self, char_id, cell, troops):
         if self.game_phase != 'place_player':
@@ -422,6 +530,8 @@ class GameState:
             raise ValueError('此格已有单位')
         if self._is_behind_enemy_line(cell, True):
             raise ValueError('不可放置在敌方棋子后方')
+        if self._is_in_front_of_friendly(cell, True):
+            raise ValueError('不可放置在友军前方')
         char = next((c for c in self.player.collection if c['id'] == char_id), None)
         if not char:
             raise ValueError('武将不在玩家卡组中')
@@ -487,7 +597,7 @@ class GameState:
         for r in rows:
             for c in range(BOARD_COLS):
                 i = r * 8 + c
-                if side.board[i] or self._is_behind_enemy_line(i, is_player) or not self._is_active_cell(i):
+                if side.board[i] or self._is_behind_enemy_line(i, is_player) or self._is_in_front_of_friendly(i, is_player) or not self._is_active_cell(i):
                     continue
                 if (r < front_cut) if is_player else (r >= front_cut):
                     front_cells.append(i)
@@ -772,9 +882,9 @@ class GameState:
             au.troops = max(0, au.troops - a_loss)
 
             if p_loss > 0:
-                self._record_melee(au.uid, p_loss)
+                self._record_melee(au.uid, pu.uid, p_loss)
             if a_loss > 0:
-                self._record_melee(pu.uid, a_loss)
+                self._record_melee(pu.uid, au.uid, a_loss)
 
             p_alive = pu.troops > 0
             a_alive = au.troops > 0
@@ -819,9 +929,9 @@ class GameState:
             pu.troops = max(0, pu.troops - p_loss)
             au.troops = max(0, au.troops - a_loss)
             if p_loss > 0:
-                self._record_melee(au.uid, p_loss)
+                self._record_melee(au.uid, pu.uid, p_loss)
             if a_loss > 0:
-                self._record_melee(pu.uid, a_loss)
+                self._record_melee(pu.uid, au.uid, a_loss)
             p_alive = pu.troops > 0
             a_alive = au.troops > 0
             if not p_alive:
@@ -870,7 +980,7 @@ class GameState:
             damage = self._calc_ranged_damage(attacker, defender, a_power, d_power)
             defender.troops = max(0, defender.troops - damage)
             if damage > 0:
-                self._record_ranged(attacker.uid, damage)
+                self._record_ranged(attacker.uid, defender.uid, damage)
             d_alive = defender.troops > 0
             if not d_alive:
                 self._mark_cooldown(defender.char['id'], not r['isPlayer'])
@@ -897,9 +1007,9 @@ class GameState:
             pu.troops = max(0, pu.troops - p_loss)
             au.troops = max(0, au.troops - a_loss)
             if p_loss > 0:
-                self._record_melee(au.uid, p_loss)
+                self._record_melee(au.uid, pu.uid, p_loss)
             if a_loss > 0:
-                self._record_melee(pu.uid, a_loss)
+                self._record_melee(pu.uid, au.uid, a_loss)
             p_alive = pu.troops > 0
             a_alive = au.troops > 0
             if not p_alive:
@@ -954,9 +1064,9 @@ class GameState:
                 pu.troops = max(0, pu.troops - p_loss)
                 au.troops = max(0, au.troops - a_loss)
                 if p_loss > 0:
-                    self._record_melee(au.uid, p_loss)
+                    self._record_melee(au.uid, pu.uid, p_loss)
                 if a_loss > 0:
-                    self._record_melee(pu.uid, a_loss)
+                    self._record_melee(pu.uid, au.uid, a_loss)
                 p_alive = pu.troops > 0
                 a_alive = au.troops > 0
                 if not p_alive:
@@ -1044,9 +1154,9 @@ class GameState:
             p_unit.troops = max(0, p_unit.troops - p_loss)
             a_unit.troops = max(0, a_unit.troops - a_loss)
             if p_loss > 0:
-                self._record_melee(a_unit.uid, p_loss)
+                self._record_melee(a_unit.uid, p_unit.uid, p_loss)
             if a_loss > 0:
-                self._record_melee(p_unit.uid, a_loss)
+                self._record_melee(p_unit.uid, a_unit.uid, a_loss)
             p_alive = p_unit.troops > 0
             a_alive = a_unit.troops > 0
             if p_alive:
@@ -1161,37 +1271,24 @@ class GameState:
             if re >= 0:
                 self.ai.flag_idx = re
 
-        p_fr = self.player.flag_idx // 8 if self.player.flag_idx >= 0 else -1
-        a_fr = self.ai.flag_idx // 8 if self.ai.flag_idx >= 0 else -1
         p_any = any(u for u in self.player.board if u)
         a_any = any(u for u in self.ai.board if u)
 
-        if p_fr == 0 and a_fr == 7:
-            pf = self.player.board[self.player.flag_idx] if self.player.flag_idx >= 0 else None
-            af = self.ai.board[self.ai.flag_idx] if self.ai.flag_idx >= 0 else None
-            if pf and af:
-                if pf.troops > af.troops:
-                    self.game_phase = 'gameover'
-                    self.winner = True
-                    self._log('🎉 同时达阵！我方兵力胜', 'win')
-                elif af.troops > pf.troops:
-                    self.game_phase = 'gameover'
-                    self.winner = False
-                    self._log('💀 同时达阵！敌方兵力胜', 'lose')
-                else:
-                    self.game_phase = 'gameover'
-                    self._log('⚖ 同时达阵，平局', 'info')
+        p_td = [u for i, u in enumerate(self.player.board) if u and i // 8 == 0]
+        a_td = [u for i, u in enumerate(self.ai.board) if u and i // 8 == 7]
+        if p_td or a_td:
+            p_troops = sum(u.troops for u in p_td)
+            a_troops = sum(u.troops for u in a_td)
+            if p_td and (not a_td or p_troops >= a_troops):
+                self.game_phase = 'gameover'
+                self.winner = True
+                self._log('🎉 达阵！我方大胜！' + (f'（{p_troops} vs {a_troops}）' if a_td else ''), 'win')
                 return
-        if p_fr == 0:
-            self.game_phase = 'gameover'
-            self.winner = True
-            self._log('🎉 旗手抵达敌阵，大胜！', 'win')
-            return
-        if a_fr == 7:
-            self.game_phase = 'gameover'
-            self.winner = False
-            self._log('💀 敌方旗手抵达底线，战败！', 'lose')
-            return
+            if a_td and (not p_td or a_troops > p_troops):
+                self.game_phase = 'gameover'
+                self.winner = False
+                self._log('💀 达阵！敌方大胜！' + (f'（{p_troops} vs {a_troops}）' if p_td else ''), 'lose')
+                return
         if len(self.draw_pile) == 0 and not p_any and a_any:
             self.game_phase = 'gameover'
             self.winner = False
@@ -1238,6 +1335,8 @@ class GameState:
             'player_cooldowns': self.player_cooldowns,
             'ai_cooldowns': self.ai_cooldowns,
             'terrain_mode': self.terrain_mode,
+            'uid_char_map': {str(k): v for k, v in self.uid_char_map.items()},
+            'uid_side_map': {str(k): v for k, v in self.uid_side_map.items()},
             'battle_log': self.battle_log,
             'winner': self.winner,
             'unit_id_counter': self.unit_id_counter,

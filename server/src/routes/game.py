@@ -1,7 +1,7 @@
 import uuid
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from ..game.state import GameState
+from ..backend.state import GameState
 
 router = APIRouter()
 
@@ -16,6 +16,10 @@ class PlaceRequest(BaseModel):
 
 class TerrainRequest(BaseModel):
     terrain: str
+
+
+class PickCardRequest(BaseModel):
+    char_id: int
 
 
 def get_game_or_404(game_id: str):
@@ -46,7 +50,31 @@ def draw_phase(game_id: str):
     if game.game_phase not in ('idle', 'draw'):
         raise HTTPException(status_code=400, detail='抽卡阶段才能抽卡')
     game.draw_phase()
-    return game.to_dict()
+    return {'state': game.to_dict()}
+
+
+@router.post('/game/{game_id}/draw-options')
+def draw_options(game_id: str):
+    game = get_game_or_404(game_id)
+    if game.game_phase not in ('idle', 'draw', 'pick_card'):
+        raise HTTPException(status_code=400, detail='抽卡阶段才能抽卡')
+    try:
+        game.draw_options()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'state': game.to_dict(), 'options': game._pending_draw_options or []}
+
+
+@router.post('/game/{game_id}/pick-card')
+def pick_card(game_id: str, body: PickCardRequest):
+    game = get_game_or_404(game_id)
+    if game.game_phase != 'pick_card':
+        raise HTTPException(status_code=400, detail='不在选卡阶段')
+    try:
+        game.pick_card(body.char_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'state': game.to_dict()}
 
 
 @router.post('/game/{game_id}/place')

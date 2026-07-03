@@ -11,6 +11,8 @@ const api = {
   newGame() { return this.request('POST', '/api/game/new'); },
   getState(gameId) { return this.request('GET', `/api/game/${gameId}`); },
   draw(gameId) { return this.request('POST', `/api/game/${gameId}/draw`); },
+  drawOptions(gameId) { return this.request('POST', `/api/game/${gameId}/draw-options`); },
+  pickCard(gameId, charId) { return this.request('POST', `/api/game/${gameId}/pick-card`, {char_id: charId}); },
   place(gameId, charId, cell, troops) { return this.request('POST', `/api/game/${gameId}/place`, {char_id: charId, cell, troops}); },
   endTurn(gameId) { return this.request('POST', `/api/game/${gameId}/end-turn`); },
   autoPlace(gameId) { return this.request('POST', `/api/game/${gameId}/auto-place`); },

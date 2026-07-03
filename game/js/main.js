@@ -87,6 +87,10 @@ function applyStateFromServer(data) {
   updateUI();
   updateSpectatorGrid();
   updateButtonStates();
+  if (gamePhase === 'gameover') {
+    setTimeout(() => showVictory(s.winner), 500);
+    if (autoPlay) toggleAutoPlay();
+  }
 }
 
 function updateButtonStates() {
@@ -317,7 +321,9 @@ function showCharDetail(char, onBoard, onAi) {
   const panel = document.getElementById('detailPanel');
   panel.className = 'detail-panel show';
   const rc = RATING_COLORS[char.rating] || '#888';
-  const status = onBoard ? '已上场' : onAi ? '敌方已上场' : '未上场';
+  const dead = isDead(char.id);
+  const onCooldown = isOnCooldown(char.id, true) || isOnCooldown(char.id, false);
+  const status = onBoard ? '已上场' : dead ? '已战死' : onAi ? '敌方已上场' : onCooldown ? '冷却中' : '未上场';
   panel.innerHTML = `
     <div class="d-top">
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
@@ -472,6 +478,7 @@ function updateAiCollectionGrid() {
     else if (onBoard) div.classList.add('used');
     else if (onCooldown) div.classList.add('cooldown');
     div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,22)}"><div class="cname">${c.name}</div><div class="cmeta">${c.type||''}</div><div class="crating">${c.rating||''}</div>${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
+    div.addEventListener('click', ()=> showCharDetail(c, onBoard, false));
     el.appendChild(div);
   });
 }
@@ -514,12 +521,15 @@ function recruitFromSpectator(charId, isPlayer) {
 }
 
 // ==================== BATTLE LOG ====================
+const MAX_LOG = 200;
 function addBattleLog(msg, type='info') {
   const el = document.getElementById('battleLog');
   const div = document.createElement('div');
   div.className = 'entry ' + type;
   div.textContent = msg;
-  el.appendChild(div); el.scrollTop = el.scrollHeight;
+  el.appendChild(div);
+  while (el.children.length > MAX_LOG) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
 }
 
 // ==================== UI ====================
@@ -542,6 +552,7 @@ function showVictory(win) {
   }
   if (bestUid) {
     for (const u of side.board) if (u&&u.uid==bestUid) { bestChar=u.char; break; }
+    if (!bestChar) bestChar = uidCharMap[bestUid] || null;
   }
   if (bestChar) {
     const s=combatStats[bestUid];
@@ -568,21 +579,57 @@ function showVictory(win) {
   const killsTop = topN(allStats, 'kills');
   const meleeTop = topN(allStats, 'meleeDmg');
   const rangedTop = topN(allStats, 'rangedDmg');
-  let html='<div class="v-rank-grid">';
-  html+='<div class="v-rank-section"><div class="v-rank-title">⚔ 击溃/击毙 TOP3</div>';
-  if (killsTop.length) killsTop.forEach((item,i)=>html+=entryHTML(item,i+1,'人','kills'));
-  else html+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
-  html+='</div>';
-  html+='<div class="v-rank-section"><div class="v-rank-title">🗡 近战伤害 TOP3</div>';
-  if (meleeTop.length) meleeTop.forEach((item,i)=>html+=entryHTML(item,i+1,'','meleeDmg'));
-  else html+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
-  html+='</div>';
-  html+='<div class="v-rank-section"><div class="v-rank-title">🏹 远程伤害 TOP3</div>';
-  if (rangedTop.length) rangedTop.forEach((item,i)=>html+=entryHTML(item,i+1,'','rangedDmg'));
-  else html+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
-  html+='</div>';
-  html+='</div>';
-  rankEl.innerHTML=html;
+
+  // Top row: MVP damage sections (2 columns)
+  let topHtml = '<div class="v-rank-grid v-top-grid">';
+  if (bestUid) {
+    const mvpStat = combatStats[bestUid];
+    if (mvpStat && mvpStat.damage_to) {
+      const dealt = Object.entries(mvpStat.damage_to)
+        .map(([uid,d])=>({uid:Number(uid), char:uidCharMap[uid], damage:d}))
+        .filter(x=>x.char)
+        .sort((a,b)=>b.damage-a.damage)
+        .slice(0,3);
+      topHtml+='<div class="v-rank-section"><div class="v-rank-title">🗡 MVP造成伤害 TOP3</div>';
+      if (dealt.length) dealt.forEach((item,i)=>{
+        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,24)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
+      });
+      else topHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
+      topHtml+='</div>';
+    }
+    if (mvpStat && mvpStat.damage_from) {
+      const received = Object.entries(mvpStat.damage_from)
+        .map(([uid,d])=>({uid:Number(uid), char:uidCharMap[uid], damage:d}))
+        .filter(x=>x.char)
+        .sort((a,b)=>b.damage-a.damage)
+        .slice(0,3);
+      topHtml+='<div class="v-rank-section"><div class="v-rank-title">🛡 对MVP造成伤害 TOP3</div>';
+      if (received.length) received.forEach((item,i)=>{
+        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,24)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
+      });
+      else topHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
+      topHtml+='</div>';
+    }
+  }
+  topHtml+='</div>';
+
+  // Bottom row: general rankings (3 columns)
+  let bottomHtml = '<div class="v-rank-grid v-bottom-grid">';
+  bottomHtml+='<div class="v-rank-section"><div class="v-rank-title">⚔ 击溃/击毙 TOP3</div>';
+  if (killsTop.length) killsTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'人','kills'));
+  else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
+  bottomHtml+='</div>';
+  bottomHtml+='<div class="v-rank-section"><div class="v-rank-title">🗡 近战伤害 TOP3</div>';
+  if (meleeTop.length) meleeTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'','meleeDmg'));
+  else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
+  bottomHtml+='</div>';
+  bottomHtml+='<div class="v-rank-section"><div class="v-rank-title">🏹 远程伤害 TOP3</div>';
+  if (rangedTop.length) rangedTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'','rangedDmg'));
+  else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
+  bottomHtml+='</div>';
+  bottomHtml+='</div>';
+
+  rankEl.innerHTML = topHtml + bottomHtml;
   ov.className='show';
 }
 
@@ -645,10 +692,46 @@ function initSortBar() {
 // ==================== API ACTIONS ====================
 async function drawPhase() {
   try {
-    const data = await api.draw(gameId);
-    applyStateFromServer(data);
+    const data = await api.drawOptions(gameId);
+    applyStateFromServer(data.state);
+    if (data.options && data.options.length) {
+      showPickModal(data.options);
+    }
   } catch (e) {
     addBattleLog('抽卡失败：' + e.message, 'lose');
+  }
+}
+
+function showPickModal(options) {
+  const grid = document.getElementById('pickGrid');
+  grid.innerHTML = '';
+  options.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'pick-card';
+    const ratingColor = RATING_COLORS[c.rating] || '#aaa';
+    const typeColor = TYPE_COLORS[c.type] || '#aaa';
+    div.innerHTML = `
+      <div class="pc-name">${c.name}</div>
+      <div class="pc-type" style="color:${typeColor}">${c.type}</div>
+      <div class="pc-rating" style="color:${ratingColor}">${c.rating}</div>
+      <div class="pc-stats">统${c.leadership} 武${c.martial} 智${c.intelligence} 政${c.politics}</div>
+    `;
+    div.addEventListener('click', () => pickCard(c.id));
+    grid.appendChild(div);
+  });
+  document.getElementById('pickModal').classList.add('show');
+}
+
+async function pickCard(charId) {
+  try {
+    const data = await api.pickCard(gameId, charId);
+    document.getElementById('pickModal').classList.remove('show');
+    applyStateFromServer(data.state);
+    if (gamePhase === 'pick_card') {
+      drawPhase();
+    }
+  } catch (e) {
+    addBattleLog('选卡失败：' + e.message, 'lose');
   }
 }
 
@@ -681,19 +764,25 @@ async function runAutoPlay() {
   if (!autoPlay) return;
   if (gamePhase === 'gameover') { toggleAutoPlay(); return; }
   try {
-    let data;
-    if (gamePhase === 'idle' || gamePhase === 'draw') {
-      data = await api.draw(gameId);
+    if (gamePhase === 'idle' || gamePhase === 'draw' || gamePhase === 'pick_card') {
+      const data = await api.drawOptions(gameId);
+      applyStateFromServer(data.state);
+      if (data.options && data.options.length) {
+        const pickData = await api.pickCard(gameId, data.options[0].id);
+        applyStateFromServer(pickData.state);
+      }
     } else if (gamePhase === 'place_player') {
-      data = await api.autoPlace(gameId);
-      if (data.gamePhase === 'place_player' || data.game_phase === 'place_player') {
+      let data = await api.autoPlace(gameId);
+      applyStateFromServer(data.state || data);
+      data = data.state || data;
+      if (data.game_phase === 'place_player' || data.gamePhase === 'place_player') {
         data = await api.endTurn(gameId);
+        applyStateFromServer(data.state || data);
       }
     } else {
       setTimeout(runAutoPlay, 300);
       return;
     }
-    applyStateFromServer(data);
     if (autoPlay && gamePhase !== 'gameover') setTimeout(runAutoPlay, 100);
   } catch (e) {
     addBattleLog('操作失败：' + e.message, 'lose');

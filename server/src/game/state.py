@@ -588,6 +588,7 @@ class GameState:
             first = next((i for i, u in enumerate(self.player.board) if u), None)
             if first is not None:
                 self.player.flag_idx = first
+        self._ai_placement()
         self._end_ai_place()
 
     def _advance_phase(self):

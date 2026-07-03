@@ -1,0 +1,1243 @@
+import json
+import random
+import os
+from copy import deepcopy
+
+CHARACTERS_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'game', 'characters.json')
+
+BOARD_ROWS = 8
+BOARD_COLS = 8
+PLAYER_ROWS = [4, 5, 6, 7]
+AI_ROWS = [0, 1, 2, 3]
+PLACE_PER_ROUND = 5
+DRAW_PER_ROUND = 3
+INIT_DRAW = 10
+INIT_TROOPS = 50000
+MAX_TROOPS_PER_UNIT = 10000
+TROOP_INCOME = 10000
+MAX_TOTAL_TROOPS = 300000
+
+def _make_tennozan():
+    m = [False] * 64
+    actives = [8, 6, 4, 2, 2, 4, 6, 8]
+    for r in range(8):
+        off = (8 - actives[r]) // 2
+        for c in range(off, off + actives[r]):
+            m[r * 8 + c] = True
+    return m
+
+
+def _make_nagashino():
+    m = [True] * 64
+    for c in range(8):
+        if c not in (1, 2, 5, 6):
+            m[3 * 8 + c] = False
+            m[4 * 8 + c] = False
+    return m
+
+
+TERRAIN_PATTERNS = {
+    'normal': [True] * 64,
+    'tennozan': _make_tennozan(),
+    'nagashino': _make_nagashino(),
+}
+RATING_ORDER = {'S+': 0, 'S': 1, 'A': 2, 'B': 3, 'C': 4, 'D': 5}
+
+
+def load_characters():
+    with open(CHARACTERS_PATH, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def shuffle(arr):
+    random.shuffle(arr)
+
+
+class Unit:
+    def __init__(self, char, troops, uid, pinned=False):
+        self.char = deepcopy(char)
+        self.troops = troops
+        self.uid = uid
+        self.pinned = pinned
+
+    def to_dict(self):
+        return {
+            'char': self.char,
+            'troops': self.troops,
+            'uid': self.uid,
+            'pinned': self.pinned,
+        }
+
+
+class SideState:
+    def __init__(self):
+        self.collection = []
+        self.board = [None] * 64
+        self.troops = INIT_TROOPS
+        self.flag_idx = -1
+        self.placed = 0
+
+    def to_dict(self):
+        return {
+            'collection': self.collection,
+            'board': [u.to_dict() if u else None for u in self.board],
+            'troops': self.troops,
+            'flag_idx': self.flag_idx,
+            'placed': self.placed,
+        }
+
+
+class GameState:
+    def __init__(self, game_id):
+        self.game_id = game_id
+        self.round = 0
+        self.game_phase = 'idle'
+        self.placed_this_turn = 0
+        self.player = SideState()
+        self.ai = SideState()
+        self.draw_pile = []
+        self.dead_list = []
+        self.spectator_pool = []
+        self.combat_stats = {}
+        self.player_cooldowns = []
+        self.ai_cooldowns = []
+        self.flag_scatter_count = {'player': 0, 'ai': 0}
+        self.unit_id_counter = 0
+        self.terrain_mode = 'normal'
+        self.battle_log = []
+        self.winner = None
+        self.scatter_debuff = {}
+        self.uid_char_map = {}
+        self.uid_side_map = {}
+
+    def _log(self, msg, typ='info'):
+        self.battle_log.append({'msg': msg, 'type': typ})
+
+    def _is_active_cell(self, idx):
+        if self.terrain_mode == 'tennozan':
+            actives = [8, 6, 4, 2, 2, 4, 6, 8]
+            r = idx // 8
+            c = idx % 8
+            off = (8 - actives[r]) // 2
+            return off <= c < off + actives[r]
+        elif self.terrain_mode == 'nagashino':
+            r = idx // 8
+            c = idx % 8
+            if r in (3, 4) and c not in (1, 2, 5, 6):
+                return False
+            return True
+        return True
+
+    def _get_neighbor_indices(self, idx):
+        r, c = idx // 8, idx % 8
+        res = []
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if dr == 0 and dc == 0:
+                    continue
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < 8 and 0 <= nc < 8:
+                    res.append(nr * 8 + nc)
+        return res
+
+    def _get_cone_indices(self, idx, is_player):
+        r, c = idx // 8, idx % 8
+        direction = -1 if is_player else 1
+        res = []
+        for dc in (-1, 0, 1):
+            nr, nc = r + direction, c + dc
+            if 0 <= nr < 8 and 0 <= nc < 8:
+                res.append(nr * 8 + nc)
+        for dc in (-2, -1, 0, 1, 2):
+            nr, nc = r + direction * 2, c + dc
+            if 0 <= nr < 8 and 0 <= nc < 8:
+                res.append(nr * 8 + nc)
+        return res
+
+    def _is_flag_unit(self, idx, is_player):
+        return self.player.flag_idx == idx if is_player else self.ai.flag_idx == idx
+
+    def _calc_power(self, index, is_player):
+        my_board = self.player.board if is_player else self.ai.board
+        en_board = self.ai.board if is_player else self.player.board
+        u = my_board[index]
+        if not u:
+            return 0
+        flag_mul = 1.1 if self._is_flag_unit(index, is_player) else 1
+        power = u.char['martial'] * 2 * flag_mul
+        power *= (1 + u.troops / 30000)
+        for ni in self._get_neighbor_indices(index):
+            nu = my_board[ni]
+            if nu:
+                power += nu.char['leadership'] * 0.05
+        power += u.char['leadership'] * flag_mul * 0.05
+        for ei in range(64):
+            eu = en_board[ei]
+            if not eu:
+                continue
+            cone = self._get_cone_indices(ei, not is_player)
+            if index in cone:
+                power -= eu.char['intelligence'] * 0.03
+        return max(1, round(power))
+
+    def _calc_battle(self, p_unit, a_unit, p_power, a_power, ratio=1):
+        p_comm = p_unit.troops * ratio
+        a_comm = a_unit.troops * ratio
+        p_pol = p_unit.char['politics'] * (1.1 if self._is_flag_unit(self.player.flag_idx, True) else 1)
+        a_pol = a_unit.char['politics'] * (1.1 if self._is_flag_unit(self.ai.flag_idx, False) else 1)
+        p_red = 1 - p_pol / 240
+        a_red = 1 - a_pol / 240
+        total = p_power + a_power
+        p_loss = round(p_comm * (a_power / total) * 0.8 * p_red) if total > 0 else 0
+        a_loss = round(a_comm * (p_power / total) * 0.8 * a_red) if total > 0 else 0
+        return {
+            'pLoss': p_loss, 'aLoss': a_loss,
+            'pLossPct': p_loss / (p_unit.troops * ratio) if p_unit.troops * ratio > 0 else 0,
+            'aLossPct': a_loss / (a_unit.troops * ratio) if a_unit.troops * ratio > 0 else 0,
+        }
+
+    def _calc_ranged_damage(self, attacker, defender, atk_power, def_power):
+        total = atk_power + def_power
+        intel_factor = attacker.char['intelligence'] / 100
+        dmg = round(attacker.troops * (atk_power / total) * intel_factor * 0.25) if total > 0 else 1
+        return max(1, dmg)
+
+    def _has_adjacent_enemy(self, idx, is_player):
+        r, c = idx // 8, idx % 8
+        enemy = self.ai if is_player else self.player
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if dr == 0 and dc == 0:
+                    continue
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < 8 and 0 <= nc < 8:
+                    if enemy.board[nr * 8 + nc]:
+                        return True
+        return False
+
+    def _is_behind_enemy_line(self, idx, is_player):
+        r, c = idx // 8, idx % 8
+        en_board = self.ai.board if is_player else self.player.board
+        if is_player:
+            for rr in range(r + 1, 8):
+                if en_board[rr * 8 + c]:
+                    return True
+        else:
+            for rr in range(r - 1, -1, -1):
+                if en_board[rr * 8 + c]:
+                    return True
+        return False
+
+    def _pin_from_placement(self, idx, is_player):
+        side = self.player if is_player else self.ai
+        enemy = self.ai if is_player else self.player
+        r, c = idx // 8, idx % 8
+        adjacent = False
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if dr == 0 and dc == 0:
+                    continue
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < 8 and 0 <= nc < 8:
+                    ei = nr * 8 + nc
+                    if enemy.board[ei]:
+                        adjacent = True
+                        enemy.board[ei].pinned = True
+        if adjacent:
+            side.board[idx].pinned = True
+
+    def _is_triple_surrounded(self, idx, is_player):
+        r, c = idx // 8, idx % 8
+        en_board = self.ai.board if is_player else self.player.board
+        has_front = (r > 0 and en_board[(r - 1) * 8 + c]) if is_player else (r < 7 and en_board[(r + 1) * 8 + c])
+        has_left = c > 0 and en_board[r * 8 + (c - 1)]
+        has_right = c < 7 and en_board[r * 8 + (c + 1)]
+        return has_front and has_left and has_right
+
+    def _get_encirclement_power_mod(self, idx, is_player):
+        r, c = idx // 8, idx % 8
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < 8 and 0 <= nc < 8:
+                    ni = nr * 8 + nc
+                    if self._is_triple_surrounded(ni, True) or self._is_triple_surrounded(ni, False):
+                        return 0.9
+        return 1
+
+    def _calc_battle_power(self, idx, is_player):
+        return round(self._calc_power(idx, is_player) * self._get_encirclement_power_mod(idx, is_player))
+
+    def _stat_slot(self, uid):
+        if uid not in self.combat_stats:
+            self.combat_stats[uid] = {'damage': 0, 'meleeDmg': 0, 'rangedDmg': 0, 'meleeHits': 0, 'rangedHits': 0,
+                                      'kills': 0, 'retreatTriggers': 0}
+        return self.combat_stats[uid]
+
+    def _record_melee(self, uid, dmg):
+        s = self._stat_slot(uid)
+        s['damage'] += dmg
+        s['meleeDmg'] += dmg
+        s['meleeHits'] += 1
+
+    def _record_ranged(self, uid, dmg):
+        s = self._stat_slot(uid)
+        s['damage'] += dmg
+        s['rangedDmg'] += dmg
+        s['rangedHits'] += 1
+
+    def _record_kill(self, uid):
+        self._stat_slot(uid)['kills'] += 1
+
+    def _record_retreat(self, uid):
+        self._stat_slot(uid)['retreatTriggers'] += 1
+
+    def _is_on_cooldown(self, char_id, is_player):
+        arr = self.player_cooldowns if is_player else self.ai_cooldowns
+        return any(c['id'] == char_id and c['round'] + 4 >= self.round for c in arr)
+
+    def _mark_cooldown(self, char_id, is_player, typ='defeat'):
+        arr = self.player_cooldowns if is_player else self.ai_cooldowns
+        existing = next((c for c in arr if c['id'] == char_id), None)
+        if existing:
+            existing['type'] = typ
+        else:
+            arr.append({'id': char_id, 'round': self.round, 'type': typ})
+
+    def _expire_cooldowns(self):
+        self.player_cooldowns = [c for c in self.player_cooldowns if c['round'] + 4 >= self.round]
+        self.ai_cooldowns = [c for c in self.ai_cooldowns if c['round'] + 4 >= self.round]
+
+    def _is_dead(self, char_id):
+        return char_id in self.dead_list
+
+    def _find_highest_troops_idx(self, board):
+        bi, bt = -1, -1
+        for i in range(64):
+            if board[i] and board[i].troops > bt:
+                bt = board[i].troops
+                bi = i
+        return bi
+
+    def _total_troops(self, side):
+        return sum(u.troops for u in side.board if u)
+
+    def _decay_income(self, side):
+        board_t = self._total_troops(side)
+        income = int(TROOP_INCOME * max(0, 1 - board_t / MAX_TOTAL_TROOPS))
+        sum_pol = sum(u.char['politics'] for u in side.board if u)
+        pol_mult = max(0.2, min(2.0, sum_pol * 0.001))
+        income = int(income * pol_mult)
+        max_add = MAX_TOTAL_TROOPS - board_t - side.troops
+        return max(0, min(income, max_add))
+
+    def reset_game(self):
+        all_chars = load_characters()
+        self.draw_pile = [deepcopy(c) for c in all_chars]
+        shuffle(self.draw_pile)
+        self.player = SideState()
+        self.ai = SideState()
+        self.round = 0
+        self.game_phase = 'idle'
+        self.placed_this_turn = 0
+        self.dead_list = []
+        self.spectator_pool = []
+        self.combat_stats = {}
+        self.player_cooldowns = []
+        self.ai_cooldowns = []
+        self.flag_scatter_count = {'player': 0, 'ai': 0}
+        self.unit_id_counter = 0
+        self.scatter_debuff = {}
+        self.uid_char_map = {}
+        self.uid_side_map = {}
+        self.battle_log = []
+        self.winner = None
+        self._log('点击「抽卡」开始', 'info')
+
+    def draw_phase(self):
+        self._expire_cooldowns()
+        if self.game_phase in ('idle', 'draw'):
+            count = INIT_DRAW if self.round == 0 else DRAW_PER_ROUND
+            if len(self.draw_pile) <= 0:
+                self.round += 1
+                self.placed_this_turn = 0
+                pi = a_inc = 0
+                if self.round > 1:
+                    pi = self._decay_income(self.player)
+                    a_inc = self._decay_income(self.ai)
+                    self.player.troops += pi
+                    self.ai.troops += a_inc
+                self.game_phase = 'place_player'
+                income_str = f'（各获{pi}/{a_inc}兵力）' if self.round > 1 else ''
+                self._log(f'第{self.round}回合 · 牌堆已空，直接放置{income_str}', 'info')
+                return
+
+            actual = min(count, len(self.draw_pile))
+            pc = self.draw_pile[:actual]
+            self.draw_pile = self.draw_pile[actual:]
+            for c in pc:
+                self.player.collection.append(c)
+
+            ac = min(actual, len(self.draw_pile))
+            ac_arr = self.draw_pile[:ac]
+            self.draw_pile = self.draw_pile[ac:]
+            for c in ac_arr:
+                self.ai.collection.append(c)
+
+            if self.round > 0 and len(self.draw_pile) > 0:
+                spec_count = min(2, len(self.draw_pile))
+                spec_arr = self.draw_pile[:spec_count]
+                self.draw_pile = self.draw_pile[spec_count:]
+                for c in spec_arr:
+                    self.spectator_pool.append(c)
+                self._log(f'观战席新增{len(spec_arr)}名武将：{"、".join(c["name"] for c in spec_arr)}', 'info')
+                self._try_recruit_ai()
+
+            self.round += 1
+            self.placed_this_turn = 0
+
+            pi = a_inc = 0
+            if self.round > 1:
+                pi = self._decay_income(self.player)
+                a_inc = self._decay_income(self.ai)
+                self.player.troops += pi
+                self.ai.troops += a_inc
+
+            self.game_phase = 'place_player'
+            income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
+            self._log(f'第{self.round}回合 · 抽{len(pc)}张，敌方抽{len(ac_arr)}张{income_str}', 'info')
+
+    def place_unit(self, char_id, cell, troops):
+        if self.game_phase != 'place_player':
+            raise ValueError('不在放置阶段')
+        if self.placed_this_turn >= PLACE_PER_ROUND:
+            raise ValueError('本回合放置次数已用完')
+        if not (0 <= cell < 64):
+            raise ValueError('无效格子')
+        if cell // 8 not in PLAYER_ROWS:
+            raise ValueError('只能在己方区域放置')
+        if not self._is_active_cell(cell):
+            raise ValueError('此格不可用')
+        if self.player.board[cell] or self.ai.board[cell]:
+            raise ValueError('此格已有单位')
+        if self._is_behind_enemy_line(cell, True):
+            raise ValueError('不可放置在敌方棋子后方')
+        char = next((c for c in self.player.collection if c['id'] == char_id), None)
+        if not char:
+            raise ValueError('武将不在玩家卡组中')
+        if any(u and u.char['id'] == char_id for u in self.player.board if u):
+            raise ValueError('该武将已在棋盘上')
+        if any(u and u.char['id'] == char_id for u in self.ai.board if u):
+            raise ValueError('敌方已有该武将')
+        if troops > self.player.troops:
+            raise ValueError('兵力不足')
+        if troops > min(MAX_TROOPS_PER_UNIT, char['leadership'] * 100):
+            raise ValueError('兵力超出上限')
+
+        self.unit_id_counter += 1
+        uid = self.unit_id_counter
+        u = Unit(char, troops, uid)
+        self.player.board[cell] = u
+        self.uid_char_map[uid] = char
+        self.uid_side_map[uid] = 'player'
+        self._pin_from_placement(cell, True)
+        self.player.troops -= troops
+        self.placed_this_turn += 1
+
+        if not any(u and self.player.flag_idx == i for i, u in enumerate(self.player.board) if u):
+            self.player.flag_idx = cell
+
+        is_flag = self.player.flag_idx == cell
+        self._log(f'放置 {char["name"]} {"🚩旗手" if is_flag else ""}', 'win')
+
+    def end_placement(self):
+        if self.game_phase != 'place_player':
+            raise ValueError('不在放置阶段')
+        if not any(self.player.board[i] and self.player.flag_idx == i for i in range(64) if self.player.board[i]):
+            first = next((i for i, u in enumerate(self.player.board) if u), None)
+            if first is not None:
+                self.player.flag_idx = first
+                self._log(f'{self.player.board[first].char["name"]} 被指定为旗手🚩', 'info')
+            else:
+                raise ValueError('请至少放置一名武将')
+
+        self.game_phase = 'place_ai'
+        self._ai_placement()
+        self._end_ai_place()
+
+    def _auto_place_side(self, side, collection, rows, is_player, max_place=None):
+        if max_place is None:
+            max_place = PLACE_PER_ROUND
+        avail = [c for c in collection
+                 if not any(u and u.char['id'] == c['id'] for u in self.player.board if u)
+                 and not any(u and u.char['id'] == c['id'] for u in self.ai.board if u)
+                 and not self._is_on_cooldown(c['id'], is_player)
+                 and not self._is_dead(c['id'])]
+        avail.sort(key=lambda c: RATING_ORDER.get(c.get('rating', ''), 9))
+
+        max_units = 10 if self.terrain_mode == 'tennozan' else (16 if self.terrain_mode == 'nagashino' else 20)
+        remain_slots = max_units - len([u for u in side.board if u])
+        to_place = min(max_place, len(avail), remain_slots)
+        if to_place == 0:
+            return
+
+        front_cut = 6 if is_player else 2
+        front_cells = []
+        back_cells = []
+        for r in rows:
+            for c in range(BOARD_COLS):
+                i = r * 8 + c
+                if side.board[i] or self._is_behind_enemy_line(i, is_player) or not self._is_active_cell(i):
+                    continue
+                if (r < front_cut) if is_player else (r >= front_cut):
+                    front_cells.append(i)
+                else:
+                    back_cells.append(i)
+        shuffle(front_cells)
+        shuffle(back_cells)
+
+        direction = -1 if is_player else 1
+        support_preferred = []
+        placed = 0
+
+        for ch in avail:
+            if placed >= to_place:
+                break
+            combat = ch['leadership'] + ch['martial']
+            support = ch['intelligence'] + ch['politics']
+            cell = None
+
+            if combat >= support:
+                if front_cells:
+                    cell = front_cells.pop()
+                    behind = (cell // 8) + direction
+                    if 0 <= behind < 8:
+                        bi = behind * 8 + (cell % 8)
+                        if self._is_active_cell(bi):
+                            support_preferred.append(bi)
+                elif support_preferred:
+                    cell = support_preferred.pop(0)
+                    if cell in back_cells:
+                        back_cells.remove(cell)
+                elif back_cells:
+                    cell = back_cells.pop()
+                else:
+                    break
+            else:
+                found = False
+                while support_preferred:
+                    c = support_preferred.pop(0)
+                    if not side.board[c] and self._is_active_cell(c) and c in back_cells:
+                        cell = c
+                        back_cells.remove(c)
+                        found = True
+                        break
+                if not found and back_cells:
+                    cell = back_cells.pop()
+                elif not found and front_cells:
+                    cell = front_cells.pop()
+                elif not found:
+                    break
+
+            max_t = min(MAX_TROOPS_PER_UNIT, ch['leadership'] * 100, side.troops)
+            t = max(500, min(max_t, round(ch['martial'] * 60 + ch['leadership'] * 40)))
+            self.unit_id_counter += 1
+            nuid = self.unit_id_counter
+            u = Unit(ch, t, nuid)
+            side.board[cell] = u
+            self.uid_char_map[nuid] = ch
+            self.uid_side_map[nuid] = 'player' if is_player else 'ai'
+            self._pin_from_placement(cell, is_player)
+            side.troops = max(0, side.troops - t)
+            placed += 1
+
+    def _ai_placement(self):
+        self._auto_place_side(self.ai, self.ai.collection, AI_ROWS, False)
+
+    def _end_ai_place(self):
+        if not any(self.ai.board[i] and self.ai.flag_idx == i for i in range(64) if self.ai.board[i]):
+            first = self._find_highest_troops_idx(self.ai.board)
+            if first >= 0:
+                self.ai.flag_idx = first
+        self._log('敌方放置完成', 'info')
+        self._advance_phase()
+
+    def _try_recruit_ai(self):
+        surviving = sum(1 for c in self.ai.collection if not self._is_dead(c['id']))
+        if surviving >= 10 or len(self.spectator_pool) == 0:
+            return
+        best = min(self.spectator_pool, key=lambda c: RATING_ORDER.get(c.get('rating', ''), 9))
+        self.spectator_pool.remove(best)
+        self.ai.collection.append(best)
+        self._log(f'敌方招募了 {best["name"]} 加入阵营', 'info')
+
+    def _surviving_count(self, side):
+        return sum(1 for c in side.collection if not self._is_dead(c['id']))
+
+    def auto_place_remaining(self):
+        if self.game_phase != 'place_player':
+            raise ValueError('不在放置阶段')
+        prev_count = len([u for u in self.player.board if u])
+        self._auto_place_side(self.player, self.player.collection, PLAYER_ROWS, True, PLACE_PER_ROUND - self.placed_this_turn)
+        placed = len([u for u in self.player.board if u]) - prev_count
+        if placed > 0:
+            self.placed_this_turn += placed
+            self._log(f'自动放置{placed}名武将', 'info')
+        has_flag = any(u and self.player.flag_idx == i for i, u in enumerate(self.player.board) if u)
+        if not has_flag:
+            first = next((i for i, u in enumerate(self.player.board) if u), None)
+            if first is not None:
+                self.player.flag_idx = first
+        self._end_ai_place()
+
+    def _advance_phase(self):
+        self.game_phase = 'battle'
+
+        p_flag_unit = self.player.board[self.player.flag_idx] if self.player.flag_idx >= 0 else None
+        a_flag_unit = self.ai.board[self.ai.flag_idx] if self.ai.flag_idx >= 0 else None
+
+        for i in range(64):
+            if self.player.board[i] and self.player.board[i].pinned and not self._has_adjacent_enemy(i, True):
+                self.player.board[i].pinned = False
+            if self.ai.board[i] and self.ai.board[i].pinned and not self._has_adjacent_enemy(i, False):
+                self.ai.board[i].pinned = False
+
+        init_troops_by_uid = {}
+        for i in range(64):
+            if self.player.board[i]:
+                init_troops_by_uid[self.player.board[i].uid] = self.player.board[i].troops
+            if self.ai.board[i]:
+                init_troops_by_uid[self.ai.board[i].uid] = self.ai.board[i].troops
+
+        engaged_p = set()
+        engaged_a = set()
+        adj_pairs = []
+        gap_battles = []
+        ranged_attacks = []
+
+        for i in range(64):
+            if self.player.board[i]:
+                r, c = i // 8, i % 8
+                e1 = self.ai.board[(r - 1) * 8 + c] if r > 0 else None
+                f1 = self.player.board[(r - 1) * 8 + c] if r > 0 else None
+                e2 = self.ai.board[(r - 2) * 8 + c] if r > 1 else None
+                if e1:
+                    engaged_p.add(i)
+                    adj_pairs.append({'pIdx': i, 'aIdx': (r - 1) * 8 + c})
+                elif f1:
+                    engaged_p.add(i)
+                    if e2:
+                        ranged_attacks.append({'attackerIdx': i, 'targetIdx': (r - 2) * 8 + c, 'isPlayer': True})
+                elif e2:
+                    engaged_p.add(i)
+                    gap_battles.append({'pIdx': i, 'aIdx': (r - 2) * 8 + c, 'gapIdx': (r - 1) * 8 + c})
+
+        for i in range(64):
+            if self.ai.board[i]:
+                r, c = i // 8, i % 8
+                e1 = self.player.board[(r + 1) * 8 + c] if r < 7 else None
+                f1 = self.ai.board[(r + 1) * 8 + c] if r < 7 else None
+                e2 = self.player.board[(r + 2) * 8 + c] if r < 6 else None
+                if e1:
+                    engaged_a.add(i)
+                    if not any(p['aIdx'] == i for p in adj_pairs):
+                        adj_pairs.append({'pIdx': (r + 1) * 8 + c, 'aIdx': i})
+                elif f1:
+                    engaged_a.add(i)
+                    if e2:
+                        ranged_attacks.append({'attackerIdx': i, 'targetIdx': (r + 2) * 8 + c, 'isPlayer': False})
+                elif e2:
+                    engaged_a.add(i)
+                    if not any(g['aIdx'] == i for g in gap_battles):
+                        gap_battles.append({'pIdx': (r + 2) * 8 + c, 'aIdx': i, 'gapIdx': (r + 1) * 8 + c})
+
+        for i in range(64):
+            if self.player.board[i] and self.player.board[i].pinned:
+                engaged_p.add(i)
+            if self.ai.board[i] and self.ai.board[i].pinned:
+                engaged_a.add(i)
+
+        p_desires = []
+        a_desires = []
+        for i in range(64):
+            if self.player.board[i] and i not in engaged_p:
+                r, c = i // 8, i % 8
+                candidates = []
+                if r > 0:
+                    cand = [(r - 1, c), (r - 1, c - 1), (r - 1, c + 1)]
+                    for nr, nc in cand:
+                        if 0 <= nr < 8 and 0 <= nc < 8:
+                            ni = nr * 8 + nc
+                            if self._is_active_cell(ni):
+                                candidates.append(ni)
+                u = self.player.board[i]
+                p_desires.append({'idx': i, 'unit': u, 'troops': u.troops, 'power': u.char['martial'] + u.char['leadership'], 'candidates': candidates})
+            if self.ai.board[i] and i not in engaged_a:
+                r, c = i // 8, i % 8
+                candidates = []
+                if r < 7:
+                    cand = [(r + 1, c), (r + 1, c - 1), (r + 1, c + 1)]
+                    for nr, nc in cand:
+                        if 0 <= nr < 8 and 0 <= nc < 8:
+                            ni = nr * 8 + nc
+                            if self._is_active_cell(ni):
+                                candidates.append(ni)
+                u = self.ai.board[i]
+                a_desires.append({'idx': i, 'unit': u, 'troops': u.troops, 'power': u.char['martial'] + u.char['leadership'], 'candidates': candidates})
+
+        p_desires.sort(key=lambda d: (-d['troops'], -d['power']))
+        a_desires.sort(key=lambda d: (-d['troops'], -d['power']))
+
+        p_moves = []
+        a_moves = []
+        p_claimed = set()
+        a_claimed = set()
+
+        for d in p_desires:
+            t = d['idx']
+            for ci in d['candidates']:
+                if ci not in p_claimed:
+                    t = ci
+                    p_claimed.add(ci)
+                    break
+            p_moves.append({'from': d['idx'], 'to': t, 'unit': d['unit']})
+
+        for d in a_desires:
+            t = d['idx']
+            for ci in d['candidates']:
+                if ci not in a_claimed:
+                    t = ci
+                    a_claimed.add(ci)
+                    break
+            a_moves.append({'from': d['idx'], 'to': t, 'unit': d['unit']})
+
+        for i in range(64):
+            if self.player.board[i] and i in engaged_p:
+                p_moves.append({'from': i, 'to': i, 'unit': self.player.board[i]})
+            if self.ai.board[i] and i in engaged_a:
+                a_moves.append({'from': i, 'to': i, 'unit': self.ai.board[i]})
+
+        p_target_map = {}
+        a_target_map = {}
+        for m in p_moves:
+            if m['to'] != m['from']:
+                p_target_map[m['to']] = m
+        for m in a_moves:
+            if m['to'] != m['from']:
+                a_target_map[m['to']] = m
+
+        contested = [t for t in p_target_map if t in a_target_map]
+        contested_info = []
+        for cell in contested:
+            pm = p_target_map[cell]
+            am = a_target_map[cell]
+            contested_info.append({
+                'cell': cell, 'pm': pm, 'am': am,
+                'pPower': self._calc_battle_power(pm['from'], True),
+                'aPower': self._calc_battle_power(am['from'], False),
+            })
+
+        old_player_board = self.player.board[:]
+        old_ai_board = self.ai.board[:]
+        self.player.board = [None] * 64
+        self.ai.board = [None] * 64
+
+        all_res = []
+
+        for m in p_moves:
+            if m['to'] not in contested:
+                self.player.board[m['to']] = m['unit']
+        for m in a_moves:
+            if m['to'] not in contested:
+                self.ai.board[m['to']] = m['unit']
+
+        front_done = set()
+        for ci in contested_info:
+            cell = ci['cell']
+            pm = ci['pm']
+            am = ci['am']
+            pu = pm['unit']
+            au = am['unit']
+            p_power = ci['pPower']
+            a_power = ci['aPower']
+            pn = pu.char['name']
+            an = au.char['name']
+            result = self._calc_battle(pu, au, p_power, a_power, 1)
+            p_loss = result['pLoss']
+            a_loss = result['aLoss']
+            p_loss_pct = result['pLossPct']
+            a_loss_pct = result['aLossPct']
+            pu.troops = max(0, pu.troops - p_loss)
+            au.troops = max(0, au.troops - a_loss)
+
+            if p_loss > 0:
+                self._record_melee(au.uid, p_loss)
+            if a_loss > 0:
+                self._record_melee(pu.uid, a_loss)
+
+            p_alive = pu.troops > 0
+            a_alive = au.troops > 0
+            if not p_alive:
+                self._mark_cooldown(pu.char['id'], True)
+                self._record_kill(au.uid)
+            if not a_alive:
+                self._mark_cooldown(au.char['id'], False)
+                self._record_kill(pu.uid)
+
+            if p_alive and not a_alive:
+                self.player.board[cell] = pu
+                self._log(f'⚔ 抢占！{pn} 击溃 {an}，进入第{cell // 8 + 1}行', 'win')
+            elif not p_alive and a_alive:
+                self.ai.board[cell] = au
+                self._log(f'⚔ 抢占！{an} 击溃 {pn}，进入第{cell // 8 + 1}行', 'lose')
+            elif p_alive and a_alive:
+                if p_loss_pct < a_loss_pct:
+                    self.player.board[cell] = pu
+                    self.ai.board[am['from']] = au
+                    self._log(f'⚔ 争夺！{pn}({round(p_loss_pct * 100)}%) 胜 {an}({round(a_loss_pct * 100)}%)，{pn}前进', 'win')
+                else:
+                    self.ai.board[cell] = au
+                    self.player.board[pm['from']] = pu
+                    self._log(f'⚔ 争夺！{an}({round(a_loss_pct * 100)}%) 胜 {pn}({round(p_loss_pct * 100)}%)，{an}前进', 'lose')
+            front_done.add(cell)
+
+        for g in gap_battles:
+            pu = self.player.board[g['pIdx']]
+            au = self.ai.board[g['aIdx']]
+            if not pu or not au:
+                continue
+            p_power = self._calc_battle_power(g['pIdx'], True)
+            a_power = self._calc_battle_power(g['aIdx'], False)
+            pn = pu.char['name']
+            an = au.char['name']
+            result = self._calc_battle(pu, au, p_power, a_power, 1)
+            p_loss = result['pLoss']
+            a_loss = result['aLoss']
+            p_loss_pct = result['pLossPct']
+            a_loss_pct = result['aLossPct']
+            pu.troops = max(0, pu.troops - p_loss)
+            au.troops = max(0, au.troops - a_loss)
+            if p_loss > 0:
+                self._record_melee(au.uid, p_loss)
+            if a_loss > 0:
+                self._record_melee(pu.uid, a_loss)
+            p_alive = pu.troops > 0
+            a_alive = au.troops > 0
+            if not p_alive:
+                self._mark_cooldown(pu.char['id'], True)
+                self._record_kill(au.uid)
+            if not a_alive:
+                self._mark_cooldown(au.char['id'], False)
+                self._record_kill(pu.uid)
+
+            adv = ''
+            if self._is_active_cell(g['gapIdx']):
+                if p_alive and not a_alive:
+                    self.player.board[g['gapIdx']] = pu
+                    self.player.board[g['pIdx']] = None
+                    adv = pn
+                elif not p_alive and a_alive:
+                    self.ai.board[g['gapIdx']] = au
+                    self.ai.board[g['aIdx']] = None
+                    adv = an
+                elif p_alive and a_alive:
+                    if p_loss_pct < a_loss_pct:
+                        self.player.board[g['gapIdx']] = pu
+                        self.player.board[g['pIdx']] = None
+                        adv = pn
+                    elif a_loss_pct < p_loss_pct:
+                        self.ai.board[g['gapIdx']] = au
+                        self.ai.board[g['aIdx']] = None
+                        adv = an
+            front_done.add(g['pIdx'])
+            front_done.add(g['aIdx'])
+            p_tag = '优' if p_power > a_power else ('劣' if p_power < a_power else '均')
+            a_tag = '优' if a_power > p_power else ('劣' if a_power < p_power else '均')
+            all_res.append(f'[前激战] {pn if p_alive else "💀" + pn}({p_tag})(损{int(p_loss_pct * 100)}%) ⚔ {an if a_alive else "💀" + an}({a_tag})(损{int(a_loss_pct * 100)}%)' + (f' → {adv}推进' if adv else ' → 对峙'))
+
+        for r in ranged_attacks:
+            attacker = self.player.board[r['attackerIdx']] if r['isPlayer'] else self.ai.board[r['attackerIdx']]
+            defender = self.ai.board[r['targetIdx']] if r['isPlayer'] else self.player.board[r['targetIdx']]
+            if not attacker or not defender:
+                continue
+            a_power = self._calc_battle_power(r['attackerIdx'], r['isPlayer'])
+            d_power = self._calc_battle_power(r['targetIdx'], not r['isPlayer'])
+            an = attacker.char['name']
+            dn = defender.char['name']
+            a_full = attacker.troops
+            d_full = defender.troops
+            damage = self._calc_ranged_damage(attacker, defender, a_power, d_power)
+            defender.troops = max(0, defender.troops - damage)
+            if damage > 0:
+                self._record_ranged(attacker.uid, damage)
+            d_alive = defender.troops > 0
+            if not d_alive:
+                self._mark_cooldown(defender.char['id'], not r['isPlayer'])
+                self._record_kill(attacker.uid)
+            pct = round(damage / d_full * 100) if d_full > 0 else 0
+            all_res.append(f'[远程] {an} → {dn} 射伤{damage}({pct}%){" 💀击毙" if not d_alive else ""}')
+
+        for i in range(64):
+            pu = self.player.board[i]
+            au = self.ai.board[i]
+            if not pu or not au or i in front_done:
+                continue
+            p_power = self._calc_battle_power(i, True)
+            a_power = self._calc_battle_power(i, False)
+            pn = pu.char['name']
+            an = au.char['name']
+            p_full = pu.troops
+            a_full = au.troops
+            result = self._calc_battle(pu, au, p_power, a_power, 1)
+            p_loss = result['pLoss']
+            a_loss = result['aLoss']
+            p_loss_pct = result['pLossPct']
+            a_loss_pct = result['aLossPct']
+            pu.troops = max(0, pu.troops - p_loss)
+            au.troops = max(0, au.troops - a_loss)
+            if p_loss > 0:
+                self._record_melee(au.uid, p_loss)
+            if a_loss > 0:
+                self._record_melee(pu.uid, a_loss)
+            p_alive = pu.troops > 0
+            a_alive = au.troops > 0
+            if not p_alive:
+                self._mark_cooldown(pu.char['id'], True)
+                self._record_kill(au.uid)
+            if not a_alive:
+                self._mark_cooldown(au.char['id'], False)
+                self._record_kill(pu.uid)
+            if p_alive:
+                self.player.board[i] = pu
+            else:
+                self.player.board[i] = None
+            if a_alive:
+                self.ai.board[i] = au
+            else:
+                self.ai.board[i] = None
+            p_tag = '优' if p_power > a_power else ('劣' if p_power < a_power else '均')
+            a_tag = '优' if a_power > p_power else ('劣' if a_power < p_power else '均')
+            if p_alive and a_alive:
+                pu.pinned = True
+                au.pinned = True
+                all_res.append(f'[前对峙] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) ⚔ {an}({a_tag})(损{int(a_loss_pct * 100)}%)')
+            elif p_alive and not a_alive:
+                all_res.append(f'[前胜] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) 击败 💀{an}')
+            elif not p_alive and a_alive:
+                all_res.append(f'[前败] 💀{pn}({p_tag}) 被 {an}({a_tag})(损{int(a_loss_pct * 100)}%) 击败')
+            else:
+                all_res.append(f'[前同尽] 💀{pn} ⚔ 💀{an}')
+            front_done.add(i)
+
+        for c in range(8):
+            for r in range(1, 8):
+                p_idx = r * 8 + c
+                a_idx = (r - 1) * 8 + c
+                if p_idx in front_done or a_idx in front_done:
+                    continue
+                pu = self.player.board[p_idx]
+                au = self.ai.board[a_idx]
+                if not pu or not au:
+                    continue
+                p_power = self._calc_battle_power(p_idx, True)
+                a_power = self._calc_battle_power(a_idx, False)
+                pn = pu.char['name']
+                an = au.char['name']
+                p_full = pu.troops
+                a_full = au.troops
+                result = self._calc_battle(pu, au, p_power, a_power, 1)
+                p_loss = result['pLoss']
+                a_loss = result['aLoss']
+                p_loss_pct = result['pLossPct']
+                a_loss_pct = result['aLossPct']
+                pu.troops = max(0, pu.troops - p_loss)
+                au.troops = max(0, au.troops - a_loss)
+                if p_loss > 0:
+                    self._record_melee(au.uid, p_loss)
+                if a_loss > 0:
+                    self._record_melee(pu.uid, a_loss)
+                p_alive = pu.troops > 0
+                a_alive = au.troops > 0
+                if not p_alive:
+                    self._mark_cooldown(pu.char['id'], True)
+                    self._record_kill(au.uid)
+                if not a_alive:
+                    self._mark_cooldown(au.char['id'], False)
+                    self._record_kill(pu.uid)
+                if p_alive:
+                    self.player.board[p_idx] = pu
+                else:
+                    self.player.board[p_idx] = None
+                if a_alive:
+                    self.ai.board[a_idx] = au
+                else:
+                    self.ai.board[a_idx] = None
+                p_tag = '优' if p_power > a_power else ('劣' if p_power < a_power else '均')
+                a_tag = '优' if a_power > p_power else ('劣' if a_power < p_power else '均')
+                if p_alive and a_alive:
+                    pu.pinned = True
+                    au.pinned = True
+                    all_res.append(f'[前对峙] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) ⚔ {an}({a_tag})(损{int(a_loss_pct * 100)}%)')
+                elif p_alive and not a_alive:
+                    all_res.append(f'[前胜] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) 击败 💀{an}')
+                elif not p_alive and a_alive:
+                    all_res.append(f'[前败] 💀{pn} 被 {an}({a_tag})(损{int(a_loss_pct * 100)}%) 击败')
+                else:
+                    all_res.append(f'[前同尽] 💀{pn} ⚔ 💀{an}')
+                front_done.add(p_idx)
+                front_done.add(a_idx)
+
+        sbattles = []
+        side_done = set()
+        for r in range(8):
+            for c in range(7):
+                l_idx = r * 8 + c
+                r_idx = r * 8 + (c + 1)
+                pu = self.player.board[l_idx]
+                au = self.ai.board[r_idx]
+                if pu and au and l_idx not in side_done and r_idx not in side_done:
+                    sbattles.append({'pIdx': l_idx, 'aIdx': r_idx, 'pUnit': pu, 'aUnit': au,
+                                     'pPower': self._calc_battle_power(l_idx, True),
+                                     'aPower': self._calc_battle_power(r_idx, False)})
+                    side_done.add(l_idx)
+                    side_done.add(r_idx)
+                pu2 = self.player.board[r_idx]
+                au2 = self.ai.board[l_idx]
+                if pu2 and au2 and r_idx not in side_done and l_idx not in side_done:
+                    sbattles.append({'pIdx': r_idx, 'aIdx': l_idx, 'pUnit': pu2, 'aUnit': au2,
+                                     'pPower': self._calc_battle_power(r_idx, True),
+                                     'aPower': self._calc_battle_power(l_idx, False)})
+                    side_done.add(r_idx)
+                    side_done.add(l_idx)
+
+        for b in sbattles:
+            self.player.board[b['pIdx']] = None
+            self.ai.board[b['aIdx']] = None
+
+        for b in sbattles:
+            p_idx = b['pIdx']
+            a_idx = b['aIdx']
+            p_unit = b['pUnit']
+            a_unit = b['aUnit']
+            p_power = b['pPower']
+            a_power = b['aPower']
+            pn = p_unit.char['name']
+            an = a_unit.char['name']
+            p_full = p_unit.troops
+            a_full = a_unit.troops
+            p_comm = p_full * 0.5
+            a_comm = a_full * 0.5
+            p_pol2 = p_unit.char['politics'] * (1.1 if self._is_flag_unit(p_idx, True) else 1)
+            a_pol2 = a_unit.char['politics'] * (1.1 if self._is_flag_unit(a_idx, False) else 1)
+            p_red2 = 1 - p_pol2 / 240
+            a_red2 = 1 - a_pol2 / 240
+            if p_power > a_power:
+                p_loss = round(p_comm * 0.34 * p_red2)
+                a_loss = round(a_comm * 0.8 * a_red2)
+            elif a_power > p_power:
+                p_loss = round(p_comm * 0.8 * p_red2)
+                a_loss = round(a_comm * 0.34 * a_red2)
+            else:
+                p_loss = round(p_comm * 0.57 * p_red2)
+                a_loss = round(a_comm * 0.57 * a_red2)
+            p_unit.troops = max(0, p_unit.troops - p_loss)
+            a_unit.troops = max(0, a_unit.troops - a_loss)
+            if p_loss > 0:
+                self._record_melee(a_unit.uid, p_loss)
+            if a_loss > 0:
+                self._record_melee(p_unit.uid, a_loss)
+            p_alive = p_unit.troops > 0
+            a_alive = a_unit.troops > 0
+            if p_alive:
+                self.player.board[p_idx] = p_unit
+            else:
+                self._mark_cooldown(p_unit.char['id'], True)
+                self._record_kill(a_unit.uid)
+            if a_alive:
+                self.ai.board[a_idx] = a_unit
+            else:
+                self._mark_cooldown(a_unit.char['id'], False)
+                self._record_kill(p_unit.uid)
+            w = '胜' if p_power > a_power else ('败' if a_power > p_power else '平')
+            s_tag = '优' if p_power > a_power else ('劣' if p_power < a_power else '均')
+            all_res.append(f'[侧{w}] {pn if p_alive else "💀" + pn}({s_tag})(战{p_power}) ⚔ {an if a_alive else "💀" + an}(战{a_power})')
+
+        for r in all_res:
+            self._log(f'⚔ {r}', 'info')
+        if not all_res:
+            self._log('⚔ 无接触，无战斗', 'info')
+
+        for i in range(64):
+            if self._is_triple_surrounded(i, True) and self.player.board[i]:
+                self._log(f'⚠ {self.player.board[i].char["name"]} 陷入三方包围，周围9格属性-10%', 'lose')
+                r, c = i // 8, i % 8
+                targets = [(r + 1, c), (r, c - 1), (r, c + 1)]
+                for dr, dc in ((1, 0), (0, -1), (0, 1)):
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < 8 and 0 <= nc < 8 and self.ai.board[nr * 8 + nc]:
+                        self._record_retreat(self.ai.board[nr * 8 + nc].uid)
+            if self._is_triple_surrounded(i, False) and self.ai.board[i]:
+                self._log(f'⚠ 敌方 {self.ai.board[i].char["name"]} 陷入三方包围，周围9格属性-10%', 'win')
+                r, c = i // 8, i % 8
+                for dr, dc in ((-1, 0), (0, -1), (0, 1)):
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < 8 and 0 <= nc < 8 and self.player.board[nr * 8 + nc]:
+                        self._record_retreat(self.player.board[nr * 8 + nc].uid)
+
+        if p_flag_unit and not any(u and u.uid == p_flag_unit.uid for u in self.player.board if u):
+            self.flag_scatter_count['player'] += 1
+            self._log(f'⚠ 旗手战死！({self.flag_scatter_count["player"]}/3)', 'lose')
+        if a_flag_unit and not any(u and u.uid == a_flag_unit.uid for u in self.ai.board if u):
+            self.flag_scatter_count['ai'] += 1
+            self._log(f'⚠ 敌方旗手战死！({self.flag_scatter_count["ai"]}/3)', 'win')
+
+        for side_is_player in (True, False):
+            brd = self.player.board if side_is_player else self.ai.board
+            for i in range(64):
+                u = brd[i]
+                if not u:
+                    continue
+                sum_pol = u.char['politics']
+                for ni in self._get_neighbor_indices(i):
+                    nu = brd[ni]
+                    if nu:
+                        sum_pol += nu.char['politics']
+                loss = (init_troops_by_uid.get(u.uid, 0) or 0) - u.troops
+                if loss > 0:
+                    rate = min(sum_pol * 0.001, 0.6)
+                    u.troops = min(u.troops + int(loss * rate), 10000)
+
+        for side_is_player in (True, False):
+            brd = self.player.board if side_is_player else self.ai.board
+            for i in range(64):
+                u = brd[i]
+                if u and u.troops < 100:
+                    died = False
+                    if self.scatter_debuff.get(u.char['id']):
+                        if not self._is_dead(u.char['id']):
+                            self.dead_list.append(u.char['id'])
+                        died = True
+                        self._log(f'{"敌方" if not side_is_player else ""}{u.char["name"]} 再次溃散，战死沙场！★', 'lose')
+                    else:
+                        self.scatter_debuff[u.char['id']] = True
+                        u.char['leadership'] = int(u.char['leadership'] * 0.9)
+                        u.char['martial'] = int(u.char['martial'] * 0.9)
+                        u.char['intelligence'] = int(u.char['intelligence'] * 0.9)
+                        u.char['politics'] = int(u.char['politics'] * 0.9)
+                        self._mark_cooldown(u.char['id'], side_is_player, 'scatter')
+                        self._log(f'{"敌方" if not side_is_player else ""}{u.char["name"]} 兵力不足100，溃散！(全属性-10%)', 'lose')
+
+                    if p_flag_unit and u.uid == p_flag_unit.uid:
+                        self.flag_scatter_count['player'] += 1
+                        self._log(f'⚠ 旗手溃散！({self.flag_scatter_count["player"]}/3)', 'lose')
+                    if a_flag_unit and u.uid == a_flag_unit.uid:
+                        self.flag_scatter_count['ai'] += 1
+                        self._log(f'⚠ 敌方旗手溃散！({self.flag_scatter_count["ai"]}/3)', 'win')
+                    brd[i] = None
+
+        self._try_recruit_ai()
+
+        def find_flag(board, pu):
+            if not pu:
+                return -1
+            for i in range(64):
+                if board[i] and board[i].uid == pu.uid:
+                    return i
+            return -1
+
+        np_idx = find_flag(self.player.board, p_flag_unit)
+        self.player.flag_idx = np_idx if np_idx >= 0 else -1
+        if self.player.flag_idx < 0:
+            re = self._find_highest_troops_idx(self.player.board)
+            if re >= 0:
+                self.player.flag_idx = re
+                self._log(f'{self.player.board[re].char["name"]}继任旗手🚩', 'info')
+
+        na_idx = find_flag(self.ai.board, a_flag_unit)
+        self.ai.flag_idx = na_idx if na_idx >= 0 else -1
+        if self.ai.flag_idx < 0:
+            re = self._find_highest_troops_idx(self.ai.board)
+            if re >= 0:
+                self.ai.flag_idx = re
+
+        p_fr = self.player.flag_idx // 8 if self.player.flag_idx >= 0 else -1
+        a_fr = self.ai.flag_idx // 8 if self.ai.flag_idx >= 0 else -1
+        p_any = any(u for u in self.player.board if u)
+        a_any = any(u for u in self.ai.board if u)
+
+        if p_fr == 0 and a_fr == 7:
+            pf = self.player.board[self.player.flag_idx] if self.player.flag_idx >= 0 else None
+            af = self.ai.board[self.ai.flag_idx] if self.ai.flag_idx >= 0 else None
+            if pf and af:
+                if pf.troops > af.troops:
+                    self.game_phase = 'gameover'
+                    self.winner = True
+                    self._log('🎉 同时达阵！我方兵力胜', 'win')
+                elif af.troops > pf.troops:
+                    self.game_phase = 'gameover'
+                    self.winner = False
+                    self._log('💀 同时达阵！敌方兵力胜', 'lose')
+                else:
+                    self.game_phase = 'gameover'
+                    self._log('⚖ 同时达阵，平局', 'info')
+                return
+        if p_fr == 0:
+            self.game_phase = 'gameover'
+            self.winner = True
+            self._log('🎉 旗手抵达敌阵，大胜！', 'win')
+            return
+        if a_fr == 7:
+            self.game_phase = 'gameover'
+            self.winner = False
+            self._log('💀 敌方旗手抵达底线，战败！', 'lose')
+            return
+        if len(self.draw_pile) == 0 and not p_any and a_any:
+            self.game_phase = 'gameover'
+            self.winner = False
+            self._log('💀 我方覆灭', 'lose')
+            return
+        if len(self.draw_pile) == 0 and p_any and not a_any:
+            self.game_phase = 'gameover'
+            self.winner = True
+            self._log('🎉 敌方覆灭', 'win')
+            return
+        if self.flag_scatter_count['player'] >= 3:
+            self.game_phase = 'gameover'
+            self.winner = False
+            self._log('💀 旗手溃散3次，我方战败！', 'lose')
+            return
+        if self.flag_scatter_count['ai'] >= 3:
+            self.game_phase = 'gameover'
+            self.winner = True
+            self._log('🎉 敌方旗手溃散3次，我方胜利！', 'win')
+            return
+
+        self.game_phase = 'draw'
+        self.placed_this_turn = 0
+        self._log(f'第{self.round}回合结束 · 点击「抽卡」继续', 'info')
+
+    def set_terrain(self, mode):
+        if mode not in ('normal', 'nagashino', 'tennozan'):
+            raise ValueError(f'无效地形模式: {mode}')
+        self.terrain_mode = mode
+
+    def to_dict(self):
+        return {
+            'game_id': self.game_id,
+            'round': self.round,
+            'game_phase': self.game_phase,
+            'placed_this_turn': self.placed_this_turn,
+            'player': self.player.to_dict(),
+            'ai': self.ai.to_dict(),
+            'draw_pile_count': len(self.draw_pile),
+            'flag_scatter_count': dict(self.flag_scatter_count),
+            'dead_list': list(self.dead_list),
+            'spectator_pool': self.spectator_pool,
+            'combat_stats': {str(k): v for k, v in self.combat_stats.items()},
+            'player_cooldowns': self.player_cooldowns,
+            'ai_cooldowns': self.ai_cooldowns,
+            'terrain_mode': self.terrain_mode,
+            'battle_log': self.battle_log,
+            'winner': self.winner,
+            'unit_id_counter': self.unit_id_counter,
+        }

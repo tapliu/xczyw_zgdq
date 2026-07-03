@@ -1,0 +1,98 @@
+import uuid
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from ..game.state import GameState
+
+router = APIRouter()
+
+games = {}
+
+
+class PlaceRequest(BaseModel):
+    char_id: int
+    cell: int
+    troops: int
+
+
+class TerrainRequest(BaseModel):
+    terrain: str
+
+
+def get_game_or_404(game_id: str):
+    game = games.get(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail='Game not found')
+    return game
+
+
+@router.post('/game/new')
+def new_game():
+    game_id = str(uuid.uuid4())
+    game = GameState(game_id)
+    game.reset_game()
+    games[game_id] = game
+    return {'game_id': game_id, 'state': game.to_dict()}
+
+
+@router.get('/game/{game_id}')
+def get_game(game_id: str):
+    game = get_game_or_404(game_id)
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/draw')
+def draw_phase(game_id: str):
+    game = get_game_or_404(game_id)
+    if game.game_phase not in ('idle', 'draw'):
+        raise HTTPException(status_code=400, detail='抽卡阶段才能抽卡')
+    game.draw_phase()
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/place')
+def place_unit(game_id: str, body: PlaceRequest):
+    game = get_game_or_404(game_id)
+    try:
+        game.place_unit(body.char_id, body.cell, body.troops)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/end-turn')
+def end_turn(game_id: str):
+    game = get_game_or_404(game_id)
+    if game.game_phase != 'place_player':
+        raise HTTPException(status_code=400, detail='不在放置阶段')
+    try:
+        game.end_placement()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/auto-place')
+def auto_place(game_id: str):
+    game = get_game_or_404(game_id)
+    try:
+        game.auto_place_remaining()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/reset')
+def reset_game(game_id: str):
+    game = get_game_or_404(game_id)
+    game.reset_game()
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/set-terrain')
+def set_terrain(game_id: str, body: TerrainRequest):
+    game = get_game_or_404(game_id)
+    try:
+        game.set_terrain(body.terrain)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return game.to_dict()

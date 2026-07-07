@@ -1226,10 +1226,14 @@ async function startSinglePlayer() {
 // ==================== CUSTOM GENERAL EDITOR ====================
 let cgSelectedAvatar = 501;
 let cgEditingId = null; // null = new creation
+let cgFromList = false; // opened from listCustomGenerals
 
 function openCustomEditor(editId) {
   openEditor();
   document.getElementById('mainMenu').style.display = 'none';
+  // If editorOverlay is showing (from listCustomGenerals), hide it and mark
+  cgFromList = document.getElementById('editorOverlay').classList.contains('show');
+  document.getElementById('editorOverlay').classList.remove('show');
   const ov = document.getElementById('customEditorOverlay');
   ov.classList.add('show');
   cgEditingId = editId || null;
@@ -1240,9 +1244,9 @@ function openCustomEditor(editId) {
   } else {
     resetCustomForm();
   }
-  // Listen for stat changes to update total
+  // Listen for stat changes to update total & type constraint
   document.querySelectorAll('#customEditorOverlay .cg-stat').forEach(el => {
-    el.addEventListener('input', updateCgTotal);
+    el.addEventListener('input', () => { updateCgTotal(); enforceCgTypeConstraint(); });
   });
   document.getElementById('cgName').addEventListener('input', updateCgPreview);
   document.querySelectorAll('#customEditorOverlay .cg-stat, #cgType').forEach(el => {
@@ -1252,7 +1256,11 @@ function openCustomEditor(editId) {
 
 function closeCustomEditor() {
   document.getElementById('customEditorOverlay').classList.remove('show');
-  document.getElementById('mainMenu').style.display = 'flex';
+  if (cgFromList) {
+    document.getElementById('editorOverlay').classList.add('show');
+  } else {
+    document.getElementById('mainMenu').style.display = 'flex';
+  }
 }
 
 function resetCustomForm() {
@@ -1264,6 +1272,7 @@ function resetCustomForm() {
   document.getElementById('cgInt').value = 50;
   document.getElementById('cgPol').value = 50;
   updateCgTotal();
+  enforceCgTypeConstraint();
   renderAvatarGrid();
   updateCgPreview();
 }
@@ -1276,8 +1285,20 @@ function renderAvatarGrid() {
     img.className = 'cg-avatar-opt' + (id === cgSelectedAvatar ? ' selected' : '');
     img.src = `portraits/${id}.webp`;
     img.onclick = () => { cgSelectedAvatar = id; renderAvatarGrid(); updateCgPreview(); };
+    img.onmouseenter = () => showAvatarDropdown(id);
+    img.onmouseleave = () => hideAvatarDropdown();
     grid.appendChild(img);
   }
+}
+
+function showAvatarDropdown(id) {
+  const el = document.getElementById('cgAvatarDropdown');
+  document.getElementById('cgAvatarDropdownImg').src = `portraits/${id}.webp`;
+  el.classList.add('show');
+}
+
+function hideAvatarDropdown() {
+  document.getElementById('cgAvatarDropdown').classList.remove('show');
 }
 
 function updateCgTotal() {
@@ -1286,6 +1307,22 @@ function updateCgTotal() {
   const it = parseInt(document.getElementById('cgInt').value) || 0;
   const po = parseInt(document.getElementById('cgPol').value) || 0;
   document.getElementById('cgTotal').textContent = `总分 ${ld + mr + it + po}`;
+}
+
+function enforceCgTypeConstraint() {
+  const ld = parseInt(document.getElementById('cgLead').value) || 0;
+  const mr = parseInt(document.getElementById('cgMar').value) || 0;
+  const it = parseInt(document.getElementById('cgInt').value) || 0;
+  const po = parseInt(document.getElementById('cgPol').value) || 0;
+  const sel = document.getElementById('cgType');
+  const isMartial = (ld + mr) >= (it + po);
+  for (const opt of sel.options) {
+    if (opt.value === '武将') opt.disabled = !isMartial;
+    else if (opt.value === '文臣') opt.disabled = isMartial;
+    else opt.disabled = false;
+  }
+  if (sel.value === '武将' && !isMartial) sel.value = '全能';
+  else if (sel.value === '文臣' && isMartial) sel.value = '全能';
 }
 
 function updateCgPreview() {
@@ -1320,6 +1357,7 @@ async function loadCustomGeneralForEdit(id) {
     cgSelectedAvatar = g.avatarId || 501;
     renderAvatarGrid();
     updateCgTotal();
+    enforceCgTypeConstraint();
     updateCgPreview();
   } catch (e) {
     showToast('加载失败: ' + e.message, 'error');
@@ -1330,14 +1368,20 @@ async function saveCustomGeneral() {
   const name = document.getElementById('cgName').value.trim();
   if (!name) { showToast('请输入武将姓名', 'error'); return; }
   const type = document.getElementById('cgType').value;
-  const ld = Math.min(100, Math.max(0, parseInt(document.getElementById('cgLead').value) || 0));
-  const mr = Math.min(100, Math.max(0, parseInt(document.getElementById('cgMar').value) || 0));
-  const it = Math.min(100, Math.max(0, parseInt(document.getElementById('cgInt').value) || 0));
-  const po = Math.min(100, Math.max(0, parseInt(document.getElementById('cgPol').value) || 0));
-  const total = ld + mr + it + po;
-  // Determine rating
+  const ld = parseInt(document.getElementById('cgLead').value) || 0;
+  const mr = parseInt(document.getElementById('cgMar').value) || 0;
+  const it = parseInt(document.getElementById('cgInt').value) || 0;
+  const po = parseInt(document.getElementById('cgPol').value) || 0;
+  const isMartial = (ld + mr) >= (it + po);
+  if (type === '武将' && !isMartial) { showToast('统武<智政时不可选择武将类型', 'error'); return; }
+  if (type === '文臣' && isMartial) { showToast('统武>=智政时不可选择文臣类型', 'error'); return; }
+  const ld2 = Math.min(100, Math.max(1, ld));
+  const mr2 = Math.min(100, Math.max(1, mr));
+  const it2 = Math.min(100, Math.max(1, it));
+  const po2 = Math.min(100, Math.max(1, po));
+  const total = ld2 + mr2 + it2 + po2;
   let rating = 'C';
-  if (ld === 100 || mr === 100 || it === 100 || po === 100) rating = 'S+';
+  if (ld2 === 100 || mr2 === 100 || it2 === 100 || po2 === 100) rating = 'S+';
   else if (total >= 360) rating = 'S';
   else if (total >= 330) rating = 'A';
   else if (total >= 300) rating = 'B';
@@ -1363,7 +1407,7 @@ async function saveCustomGeneral() {
   const entry = {
     id: cgEditingId,
     name, type,
-    leadership: ld, martial: mr, intelligence: it, politics: po,
+    leadership: ld2, martial: mr2, intelligence: it2, politics: po2,
     total_score: total, rating,
     avatarId: cgSelectedAvatar,
   };

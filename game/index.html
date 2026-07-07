@@ -26,7 +26,7 @@
       <button class="menu-btn" onclick="listCustomGenerals()"><span class="menu-icon">📝</span> 编辑自建武将</button>
       <button class="menu-btn quit" onclick="closeEditor()" style="border-color:#555"><span class="menu-icon">🔙</span> 返回主菜单</button>
     </div>
-    <div class="menu-footer">Powered by FastAPI · 战国风云 <span class="version-badge">v0.0.1</span></div>
+    <div class="menu-footer">Powered by FastAPI · 战国风云 <span class="version-badge">v0.0.3</span></div>
   </div>
 </div>
 
@@ -128,43 +128,6 @@
 <script src="js/api.js"></script>
 <script src="js/main.js"></script>
 
-<!-- 自建武将编辑器 -->
-<div class="editor-overlay" id="customEditorOverlay">
-  <div class="editor-screen">
-    <div class="editor-hdr">
-      <h2>✏️ 自建武将</h2>
-      <div class="editor-hdr-btns">
-        <button class="btn btn-outline btn-small" onclick="saveCustomGeneral()">保存</button>
-        <button class="btn btn-outline btn-small" onclick="closeCustomEditor()">返回</button>
-      </div>
-    </div>
-    <div class="cg-body">
-      <!-- 左侧：头像选择 -->
-      <div class="cg-left">
-        <div class="cg-section-title">选择头像</div>
-        <div class="cg-avatar-grid" id="cgAvatarGrid"></div>
-      </div>
-      <!-- 右侧：属性编辑 -->
-      <div class="cg-right">
-        <div class="cg-field"><span class="cg-label">姓名</span><input class="cg-input cg-name" id="cgName" placeholder="输入武将姓名"></div>
-        <div class="cg-field"><span class="cg-label">类型</span>
-          <select class="cg-input" id="cgType">${['全能','文臣','武将','特才'].map(t => `<option>${t}</option>`).join('')}</select>
-        </div>
-        <div class="cg-field"><span class="cg-label">统</span><input class="cg-input cg-stat" id="cgLead" type="number" min="0" max="100" value="50"></div>
-        <div class="cg-field"><span class="cg-label">武</span><input class="cg-input cg-stat" id="cgMar" type="number" min="0" max="100" value="50"></div>
-        <div class="cg-field"><span class="cg-label">智</span><input class="cg-input cg-stat" id="cgInt" type="number" min="0" max="100" value="50"></div>
-        <div class="cg-field"><span class="cg-label">政</span><input class="cg-input cg-stat" id="cgPol" type="number" min="0" max="100" value="50"></div>
-        <div class="cg-total" id="cgTotal">总分 200</div>
-        <div class="cg-actions">
-          <button class="btn btn-outline" onclick="saveCustomGeneral()">💾 保存武将</button>
-          <button class="btn btn-outline" onclick="closeCustomEditor()">返回</button>
-        </div>
-        <div class="cg-prev" id="cgPreview"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- 武将编辑器 -->
 <div class="editor-overlay" id="editorOverlay">
   <div class="editor-screen">
@@ -177,6 +140,48 @@
       </div>
     </div>
     <div class="editor-grid" id="editorGrid"></div>
+  </div>
+</div>
+
+<!-- 自建武将编辑器（放在后面确保更高的叠放次序） -->
+<div class="editor-overlay" id="customEditorOverlay">
+  <div class="editor-screen">
+    <div class="editor-hdr">
+      <h2>✏️ 自建武将</h2>
+    </div>
+    <div class="cg-body">
+      <!-- 左侧：头像选择 -->
+      <div class="cg-left">
+        <div class="cg-section-title">选择头像</div>
+        <div class="cg-avatar-grid" id="cgAvatarGrid"></div>
+        <div class="cg-avatar-dropdown" id="cgAvatarDropdown">
+          <img id="cgAvatarDropdownImg" src="" alt="">
+        </div>
+      </div>
+      <!-- 右侧：属性编辑 -->
+      <div class="cg-right">
+        <div class="cg-align-spacer"></div>
+        <div class="cg-field"><span class="cg-label">姓名</span><input class="cg-input cg-name" id="cgName" placeholder="输入武将姓名"></div>
+        <div class="cg-field"><span class="cg-label">类型</span>
+          <select class="cg-input" id="cgType">
+            <option>全能</option>
+            <option>文臣</option>
+            <option>武将</option>
+            <option>特才</option>
+          </select>
+        </div>
+        <div class="cg-field"><span class="cg-label">统</span><input class="cg-input cg-stat" id="cgLead" type="number" min="1" max="100" value="50"></div>
+        <div class="cg-field"><span class="cg-label">武</span><input class="cg-input cg-stat" id="cgMar" type="number" min="1" max="100" value="50"></div>
+        <div class="cg-field"><span class="cg-label">智</span><input class="cg-input cg-stat" id="cgInt" type="number" min="1" max="100" value="50"></div>
+        <div class="cg-field"><span class="cg-label">政</span><input class="cg-input cg-stat" id="cgPol" type="number" min="1" max="100" value="50"></div>
+        <div class="cg-total" id="cgTotal">总分 200</div>
+        <div class="cg-actions">
+          <button class="btn btn-outline" onclick="saveCustomGeneral()">💾 保存武将</button>
+          <button class="btn btn-outline" onclick="closeCustomEditor()">返回</button>
+        </div>
+        <div class="cg-prev" id="cgPreview"></div>
+      </div>
+    </div>
   </div>
 </div>
 </body>

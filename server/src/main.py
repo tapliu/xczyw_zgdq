@@ -1,4 +1,5 @@
 import os
+import mimetypes
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from .routes.game import router as game_router
+
+# Register WebP MIME type (Python's mimetypes doesn't know it)
+mimetypes.add_type('image/webp', '.webp')
 
 class CacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

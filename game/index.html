@@ -127,6 +127,18 @@
 
 <script src="js/api.js"></script>
 <script src="js/main.js"></script>
+<script>
+// Preload all portrait images into browser cache
+(function preloadPortraits() {
+  const ids = [];
+  for (let i = 1; i <= 100; i++) ids.push(i);
+  for (let i = 501; i <= 520; i++) ids.push(i);
+  ids.forEach(id => {
+    const img = new Image();
+    img.src = `portraits/${id}.webp`;
+  });
+})();
+</script>
 
 <!-- 武将编辑器 -->
 <div class="editor-overlay" id="editorOverlay">

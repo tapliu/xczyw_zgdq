@@ -3,9 +3,21 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 from .routes.game import router as game_router
 
+class CacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        if request.url.path.endswith(('.webp', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff2', '.css', '.js')):
+            response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return response
+
 app = FastAPI(title="战国夺旗")
+
+app.add_middleware(CacheMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

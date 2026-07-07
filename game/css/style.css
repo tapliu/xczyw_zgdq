@@ -246,7 +246,7 @@ header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webk
 .editor-hdr h2{font-size:16px;color:#f5a623}
 .editor-hdr-btns{display:flex;gap:6px}
 .pick-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.editor-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px;padding:8px 4px}
+.editor-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(6,1fr);gap:6px;padding:8px 4px}
 .editor-grid::-webkit-scrollbar{width:4px}
 .editor-grid::-webkit-scrollbar-thumb{background:#e94560;border-radius:2px}
 .ec-card{background:#12122e;border:1px solid #222255;border-radius:6px;padding:8px;text-align:center}

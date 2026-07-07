@@ -795,18 +795,42 @@ function showVictory(win) {
   let topHtml = '<div class="v-rank-grid v-top-grid">';
   if (bestUid) {
     const mvpStat = combatStats[bestUid];
+    // find MVP's slot
+    let mvpSlot = -1;
+    for (let i=0;i<64;i++) { if ((player.board[i]&&player.board[i].uid==bestUid)||(ai.board[i]&&ai.board[i].uid==bestUid)) { mvpSlot=i; break; } }
+    // build slot→UID map
+    const slotToUid = {};
+    for (let i=0;i<64;i++) {
+      if (player.board[i]) slotToUid[i]=player.board[i].uid;
+      else if (ai.board[i]) slotToUid[i]=ai.board[i].uid;
+    }
+    // count hits per target UID from MVP's hit_details
+    const dealtHitCount = {};
+    if (mvpStat.melee_hit_details) for (const h of mvpStat.melee_hit_details) { const tuid=slotToUid[+h.target]; if (tuid) dealtHitCount[tuid]=(dealtHitCount[tuid]||0)+1; }
+    if (mvpStat.ranged_hit_details) for (const h of mvpStat.ranged_hit_details) { const tuid=slotToUid[+h.target]; if (tuid) dealtHitCount[tuid]=(dealtHitCount[tuid]||0)+1; }
+    // count hits per attacker UID against MVP's slot
+    const recvHitCount = {};
+    const sk = String(mvpSlot);
+    if (mvpSlot>=0) for (const uid in combatStats) {
+      if (uid==bestUid) continue;
+      const st = combatStats[uid];
+      if (st.melee_hit_details) for (const h of st.melee_hit_details) { if (h.target==sk) recvHitCount[uid]=(recvHitCount[uid]||0)+1; }
+      if (st.ranged_hit_details) for (const h of st.ranged_hit_details) { if (h.target==sk) recvHitCount[uid]=(recvHitCount[uid]||0)+1; }
+    }
     if (mvpStat && mvpStat.damage_to) {
       const dealtAgg = {};
       for (const [uid, d] of Object.entries(mvpStat.damage_to)) {
         const ch = uidCharMap[uid];
         if (!ch) continue;
-        dealtAgg[ch.id] = dealtAgg[ch.id] || { char: ch, damage: 0 };
+        dealtAgg[ch.id] = dealtAgg[ch.id] || { char: ch, damage: 0, hits: 0 };
         dealtAgg[ch.id].damage += d;
+        dealtAgg[ch.id].hits += dealtHitCount[uid]||0;
       }
       const dealt = Object.values(dealtAgg).sort((a,b)=>b.damage-a.damage).slice(0,3);
       topHtml+='<div class="v-rank-section"><div class="v-rank-title">🗡 MVP造成伤害 TOP3</div>';
       if (dealt.length) dealt.forEach((item,i)=>{
-        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
+        const avg = item.hits>0 ? (item.damage/item.hits).toFixed(1) : '';
+        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span>${avg?`<div class="v-rank-hits">${item.hits}次 · 均伤 ${avg}</div>`:''}</div>`;
       });
       else topHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
       topHtml+='</div>';
@@ -816,13 +840,15 @@ function showVictory(win) {
       for (const [uid, d] of Object.entries(mvpStat.damage_from)) {
         const ch = uidCharMap[uid];
         if (!ch) continue;
-        recvAgg[ch.id] = recvAgg[ch.id] || { char: ch, damage: 0 };
+        recvAgg[ch.id] = recvAgg[ch.id] || { char: ch, damage: 0, hits: 0 };
         recvAgg[ch.id].damage += d;
+        recvAgg[ch.id].hits += recvHitCount[uid]||0;
       }
       const received = Object.values(recvAgg).sort((a,b)=>b.damage-a.damage).slice(0,3);
       topHtml+='<div class="v-rank-section"><div class="v-rank-title">🛡 对MVP造成伤害 TOP3</div>';
       if (received.length) received.forEach((item,i)=>{
-        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
+        const avg = item.hits>0 ? (item.damage/item.hits).toFixed(1) : '';
+        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span>${avg?`<div class="v-rank-hits">${item.hits}次 · 均伤 ${avg}</div>`:''}</div>`;
       });
       else topHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
       topHtml+='</div>';

@@ -1,7 +1,8 @@
 import uuid
+from typing import Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from ..backend.state import GameState
+from ..backend.state import GameState, edited_characters
 
 router = APIRouter()
 
@@ -124,3 +125,77 @@ def set_terrain(game_id: str, body: TerrainRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return game.to_dict()
+
+
+# ---- Character Editor API (in-memory, does not touch characters.json) ----
+class SaveCharactersRequest(BaseModel):
+    characters: list[Dict[str, Any]]
+
+
+@router.post('/characters/save')
+def _recalc_rating(c):
+    if c.get('leadership')==100 or c.get('martial')==100 or c.get('intelligence')==100 or c.get('politics')==100:
+        return 'S+'
+    return None
+
+def save_characters(body: SaveCharactersRequest):
+    # Recalculate ratings server-side
+    splus_ids = set()
+    for c in body.characters:
+        r = _recalc_rating(c)
+        if r == 'S+':
+            splus_ids.add(c['id'])
+    rest = [c for c in body.characters if c['id'] not in splus_ids]
+    rest.sort(key=lambda c: -(c.get('leadership',0)+c.get('martial',0)+c.get('intelligence',0)+c.get('politics',0)))
+    n = len(rest)
+    ratios = [(1/11, 'S'), (3/11, 'A'), (5/11, 'B'), (8/11, 'C'), (1, 'D')]
+    for i, c in enumerate(rest):
+        p = i / n
+        for thr, tier in ratios:
+            if p < thr:
+                c['rating'] = tier
+                break
+    for c in body.characters:
+        if c['id'] in splus_ids:
+            c['rating'] = 'S+'
+
+    edited_characters.clear()
+    for c in body.characters:
+        cid = c.get('id')
+        if cid is not None:
+            edited_characters[cid] = c
+    return {'saved': len(body.characters), 'ok': True}
+
+
+@router.post('/characters/reset-all')
+def reset_all_characters():
+    edited_characters.clear()
+    return {'ok': True}
+
+
+@router.get('/characters/edited')
+def get_edited_characters():
+    return {'characters': list(edited_characters.values())}
+
+
+# ---- Custom General API ----
+from ..backend.state import custom_generals
+
+
+class CustomGeneralRequest(BaseModel):
+    generals: list[Dict[str, Any]]
+
+
+@router.post('/characters/custom/save')
+def save_custom_generals(body: CustomGeneralRequest):
+    custom_generals.clear()
+    for g in body.generals:
+        gid = g.get('id')
+        if gid is not None:
+            custom_generals[gid] = g
+    return {'saved': len(body.generals), 'ok': True}
+
+
+@router.get('/characters/custom')
+def get_custom_generals():
+    return {'generals': list(custom_generals.values())}

@@ -27,7 +27,7 @@ const TERRAIN_PATTERNS = {
 };
 const MAX_UNITS_PER_SIDE = 20;
 function maxUnits() { return terrainMode === 'tennozan' ? 10 : terrainMode === 'nagashino' ? 16 : MAX_UNITS_PER_SIDE; }
-const RATING_COLORS = { 'S+':'#e94560','S':'#9b59b6','A':'#3498db','B':'#2ecc71','C':'#607d8b','D':'#7f8c8d' };
+const RATING_COLORS = { 'S+':'#8b0000','S':'#e94560','A':'#8b4513','B':'#ffd700','C':'#2e8b57','D':'#1e90ff' };
 const TYPE_COLORS = { '全能':'#f5a623','武将':'#e94560','文臣':'#3498db','特才':'#9b59b6' };
 const MON_CRESTS = ['◈','◆','★','✿','❖','⚘','✧','❀','✦','♰'];
 const CAT_NAMES = ['全能','武将','文臣','特才'];
@@ -65,13 +65,28 @@ function normalizeSide(obj) {
 
 function applyStateFromServer(data) {
   const s = data.state || data;
+  // Strip type multipliers for display (show original stats)
+  function restoreOrig(arr) {
+    if (!arr) return;
+    arr.forEach(item => {
+      const c = item?.char || item;
+      if (c && c.orig_leadership !== undefined) {
+        c.leadership = c.orig_leadership;
+        c.martial = c.orig_martial;
+        c.intelligence = c.orig_intelligence;
+        c.politics = c.orig_politics;
+      }
+    });
+  }
+  if (s.player) { restoreOrig(s.player.board); restoreOrig(s.player.collection); player = normalizeSide(s.player); }
+  if (s.ai) { restoreOrig(s.ai.board); restoreOrig(s.ai.collection); ai = normalizeSide(s.ai); }
+  restoreOrig(s.spectator_pool);
+  restoreOrig(s.dead_list);
   if (s.game_id) gameId = s.game_id;
   gamePhase = s.game_phase ?? s.gamePhase ?? gamePhase;
   if (s.round !== undefined) round = s.round;
   drawPileCount = s.draw_pile_count ?? s.drawPileCount ?? drawPileCount;
   placedThisTurn = s.placed_this_turn ?? s.placedThisTurn ?? placedThisTurn;
-  if (s.player) player = normalizeSide(s.player);
-  if (s.ai) ai = normalizeSide(s.ai);
   playerCooldowns = s.player_cooldowns ?? s.playerCooldowns ?? playerCooldowns;
   aiCooldowns = s.ai_cooldowns ?? s.aiCooldowns ?? aiCooldowns;
   scatterDebuff = s.scatter_debuff ?? s.scatterDebuff ?? scatterDebuff;
@@ -129,8 +144,9 @@ function generateAvatar(char, size) {
   const key = char.id + '-' + size;
   if (avatarCache[key]) return avatarCache[key];
   // Use webp portrait when available
-  if (char.id >= 1 && char.id <= 100) {
-    avatarCache[key] = 'portraits/' + char.id + '.webp';
+  const pid = char.avatarId || char.id;
+  if (pid >= 1 && pid <= 100 || pid >= 501 && pid <= 520) {
+    avatarCache[key] = 'portraits/' + pid + '.webp';
     return avatarCache[key];
   }
   // Fallback: canvas-generated avatar
@@ -206,11 +222,13 @@ function renderBoardFull() {
       if (selectedCell === i) cell.classList.add('highlight');
       if (both) {
         const pFlag = player.flagIdx === i, aFlag = ai.flagIdx === i;
+        if (pFlag||aFlag) cell.classList.add('flag-cell');
         const pPower = Math.round(calcPower(i, true)), aPower2 = Math.round(calcPower(i, false));
-        cell.innerHTML = `<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,18)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?'🚩':''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?'🚩':''}${generateAvatar(au.char,18)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
+        cell.innerHTML = `<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,18)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?'<span class="u-flag">🏴</span>':''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?'<span class="u-flag">🏴</span>':''}${generateAvatar(au.char,18)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
       } else {
         const isFlag = (isPlayer && player.flagIdx === i) || (!isPlayer && ai.flagIdx === i);
-        const flagIcon = isFlag ? '<span class="u-flag">🚩</span>' : '';
+        if (isFlag) cell.classList.add('flag-cell');
+        const flagIcon = isFlag ? '<span class="u-flag">🏴</span>' : '';
         const dirIcon = isPlayer ? '▲' : '▼';
         const power = Math.round(calcPower(i, isPlayer));
         cell.innerHTML = `${flagIcon}<img class="u-avatar" src="${generateAvatar(u.char,24)}" alt="">
@@ -316,7 +334,8 @@ function showDetailUnit(u, isPlayer, idx) {
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
       <div class="d-info">
         <div class="dname" style="color:${rc}">${char.name} ${isFlag?'🚩':''}</div>
-        <div class="dmeta">${char.type||''} · ${char.rating||''} · 战力 ${power}</div>
+        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''} · 战力 ${power}</div>
+        ${char.note ? `<div class="dnote">${escHtml(char.note)}</div>` : ''}
       </div>
     </div>
     <div class="d-troops ${isPlayer?'player':'ai'}">⚔ ${u.troops.toLocaleString()} 兵力</div>
@@ -346,7 +365,8 @@ function showCharDetail(char, onBoard, onAi) {
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
       <div class="d-info">
         <div class="dname" style="color:${rc}">${isFlagGen ? '🚩 ' : ''}${char.name}</div>
-        <div class="dmeta">${char.type||''} · ${char.rating||''} · ${status}</div>
+        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''} · ${status}</div>
+        ${char.note ? `<div class="dnote">${escHtml(char.note)}</div>` : ''}
       </div>
     </div>
     ${statBar('统率',char.leadership,'#e94560')}
@@ -494,7 +514,7 @@ function updateCollectionGrid() {
       : isOtherFlagWaiting ? '<div class="freeze-badge" style="background:rgba(80,80,80,0.7);color:#999">⏳ 旗本在场</div>'
       : isFlagGen ? '<div class="freeze-badge" style="background:rgba(100,50,0,0.7);color:#f5a623">🚩 旗本</div>'
       : '';
-    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}${showAttr}</div>`;
+    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}${showAttr}</div>`;
     div.addEventListener('click', ()=>{
       showCharDetail(c, onBoard, onAi || onCooldown || dead || isLocked || isOtherFlagWaiting);
       if (onBoard||onAi||onCooldown||dead||isLocked||isOtherFlagWaiting) return;
@@ -552,7 +572,7 @@ function updateAiCollectionGrid() {
       : isCurrentFlag ? '<div class="freeze-badge" style="background:rgba(0,100,0,0.7);color:#4caf50">🚩</div>'
       : isFlagGen ? '<div class="freeze-badge" style="background:rgba(100,50,0,0.7);color:#f5a623">🚩</div>'
       : '';
-    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
+    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
     div.addEventListener('click', ()=> showCharDetail(c, onBoard, false));
     el.appendChild(div);
   });
@@ -579,7 +599,7 @@ function updateSpectatorGrid() {
     const div = document.createElement('div');
     div.className = 'char-card';
     const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
-    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>`;
+    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>`;
     if (canRecruit) { html += '<div style="font-size:9px;color:#4caf50;text-align:center">招募</div>'; }
     div.innerHTML = html;
     if (canRecruit) div.addEventListener('click', () => recruitFromSpectator(c.id, true));
@@ -640,12 +660,22 @@ function showVictory(win) {
     mvpEl.style.display='none';
   }
   const rankEl=document.getElementById('rankDisplay');
-  const allStats=[];
+  const charAgg = {};
   for (const uid in combatStats) {
-    const ch=uidCharMap[uid];
+    const ch = uidCharMap[uid];
     if (!ch) continue;
-    allStats.push({ uid, char:ch, side:uidSideMap[uid]||'player', ...combatStats[uid] });
+    const cid = ch.id;
+    if (!charAgg[cid]) charAgg[cid] = { char: ch, side: uidSideMap[uid] || 'player', damage: 0, meleeDmg: 0, rangedDmg: 0, meleeHits: 0, rangedHits: 0, kills: 0, retreatTriggers: 0 };
+    const s = combatStats[uid];
+    charAgg[cid].damage += s.damage || 0;
+    charAgg[cid].meleeDmg += s.meleeDmg || 0;
+    charAgg[cid].rangedDmg += s.rangedDmg || 0;
+    charAgg[cid].meleeHits += s.meleeHits || 0;
+    charAgg[cid].rangedHits += s.rangedHits || 0;
+    charAgg[cid].kills += s.kills || 0;
+    charAgg[cid].retreatTriggers += s.retreatTriggers || 0;
   }
+  const allStats = Object.values(charAgg);
   const sideLabel = s => s==='player'?'<span class="v-rank-side p">己</span>':'<span class="v-rank-side a">敌</span>';
   const entryHTML = (item, rank, valLabel, valKey) => {
     const v = valKey ? item[valKey] : item;
@@ -661,11 +691,14 @@ function showVictory(win) {
   if (bestUid) {
     const mvpStat = combatStats[bestUid];
     if (mvpStat && mvpStat.damage_to) {
-      const dealt = Object.entries(mvpStat.damage_to)
-        .map(([uid,d])=>({uid:Number(uid), char:uidCharMap[uid], damage:d}))
-        .filter(x=>x.char)
-        .sort((a,b)=>b.damage-a.damage)
-        .slice(0,3);
+      const dealtAgg = {};
+      for (const [uid, d] of Object.entries(mvpStat.damage_to)) {
+        const ch = uidCharMap[uid];
+        if (!ch) continue;
+        dealtAgg[ch.id] = dealtAgg[ch.id] || { char: ch, damage: 0 };
+        dealtAgg[ch.id].damage += d;
+      }
+      const dealt = Object.values(dealtAgg).sort((a,b)=>b.damage-a.damage).slice(0,3);
       topHtml+='<div class="v-rank-section"><div class="v-rank-title">🗡 MVP造成伤害 TOP3</div>';
       if (dealt.length) dealt.forEach((item,i)=>{
         topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
@@ -674,11 +707,14 @@ function showVictory(win) {
       topHtml+='</div>';
     }
     if (mvpStat && mvpStat.damage_from) {
-      const received = Object.entries(mvpStat.damage_from)
-        .map(([uid,d])=>({uid:Number(uid), char:uidCharMap[uid], damage:d}))
-        .filter(x=>x.char)
-        .sort((a,b)=>b.damage-a.damage)
-        .slice(0,3);
+      const recvAgg = {};
+      for (const [uid, d] of Object.entries(mvpStat.damage_from)) {
+        const ch = uidCharMap[uid];
+        if (!ch) continue;
+        recvAgg[ch.id] = recvAgg[ch.id] || { char: ch, damage: 0 };
+        recvAgg[ch.id].damage += d;
+      }
+      const received = Object.values(recvAgg).sort((a,b)=>b.damage-a.damage).slice(0,3);
       topHtml+='<div class="v-rank-section"><div class="v-rank-title">🛡 对MVP造成伤害 TOP3</div>';
       if (received.length) received.forEach((item,i)=>{
         topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
@@ -728,8 +764,8 @@ function updateUI() {
   document.getElementById('drawPileCount').textContent = drawPileCount !== undefined ? drawPileCount : 0;
   document.getElementById('placementCount').textContent = `已放 ${placedThisTurn}/${PLACE_PER_ROUND}`;
   document.getElementById('roundDisplay').textContent = round;
-  document.getElementById('pFlagScatter').textContent = `🚩溃散 ${flagScatterCount.player}/3`;
-  document.getElementById('aFlagScatter').textContent = `🚩溃散 ${flagScatterCount.ai}/3`;
+  document.getElementById('pFlagScatter').textContent = `🏴溃散 ${flagScatterCount.player}/3`;
+  document.getElementById('aFlagScatter').textContent = `🏴溃散 ${flagScatterCount.ai}/3`;
   updateCollectionGrid(); updateAiCollectionGrid(); updateSpectatorGrid(); updateIncomeDisplay();
 }
 
@@ -771,6 +807,13 @@ async function drawPhase() {
     const data = await api.drawOptions(gameId);
     applyStateFromServer(data.state);
     if (data.options && data.options.length) {
+      // Restore original display stats
+      data.options.forEach(c => {
+        if (c.orig_leadership !== undefined) {
+          c.leadership = c.orig_leadership; c.martial = c.orig_martial;
+          c.intelligence = c.orig_intelligence; c.politics = c.orig_politics;
+        }
+      });
       showPickModal(data.options);
       if (pendingFlagPicks > 0) {
         setPhase(`🎴 选择旗本武将（${pendingFlagPicks}名剩余）`);
@@ -798,6 +841,7 @@ function showPickModal(options) {
       <div class="pc-name">${c.name}</div>
       <div class="pc-type" style="color:${typeColor}">${c.type}</div>
       <div class="pc-rating" style="color:${ratingColor}">${c.rating}</div>
+      ${c.identity ? `<div class="pc-identity" style="font-size:9px;color:#f5a623;margin-top:1px">${c.identity}</div>` : ''}
       <div class="pc-stats">统${c.leadership} 武${c.martial} 智${c.intelligence} 政${c.politics}</div>
       <div class="pc-attr-bar"><span class="pc-attr-l">统</span><span class="pc-attr-f" style="width:${c.leadership}%"></span></div>
       <div class="pc-attr-bar"><span class="pc-attr-l">武</span><span class="pc-attr-f" style="width:${c.martial}%;background:#f5a623"></span></div>
@@ -823,6 +867,30 @@ async function pickCard(charId) {
   } catch (e) {
     addBattleLog('选卡失败：' + e.message, 'lose');
   }
+}
+
+function autoPickCard() {
+  const grid = document.getElementById('pickGrid');
+  const cards = grid.querySelectorAll('.pick-card');
+  if (!cards.length) return;
+  // Gather current options from the DOM data
+  let options = [];
+  cards.forEach(el => {
+    const name = el.querySelector('.pc-name')?.textContent || '';
+    const totalText = el.querySelector('.pc-total')?.textContent || '';
+    const total = parseInt(totalText.replace('总分 ', '')) || 0;
+    const type = el.querySelector('.pc-type')?.textContent || '';
+    options.push({el, name, total, type});
+  });
+  // Pick best: highest total, tiebreak by type 全能, else random
+  const maxTotal = Math.max(...options.map(o => o.total));
+  let best = options.filter(o => o.total === maxTotal);
+  const quanNeng = best.filter(o => o.type === '全能');
+  if (quanNeng.length > 0) {
+    best = quanNeng;
+  }
+  const picked = best.length === 1 ? best[0] : best[Math.floor(Math.random() * best.length)];
+  picked.el.click();
 }
 
 async function endPlacement() {
@@ -944,6 +1012,200 @@ function menuPlaceholder(name) {
   addBattleLog(`「${name}」功能开发中，敬请期待`, 'info');
 }
 
+function quitGame() {
+  if (confirm('确定要退出游戏吗？')) {
+    try { window.close(); } catch(e) {}
+    document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;color:#888;font-size:18px">窗口即将关闭...</div>';
+  }
+}
+
+function openEditor() {
+  document.getElementById('menuButtons').style.display = 'none';
+  document.getElementById('editorButtons').style.display = 'flex';
+}
+
+function closeEditor() {
+  document.getElementById('editorButtons').style.display = 'none';
+  document.getElementById('menuButtons').style.display = 'flex';
+}
+
+function editorPlaceholder(name) {
+  addBattleLog(`「${name}」功能开发中，敬请期待`, 'info');
+  alert(`「${name}」功能开发中，敬请期待`);
+}
+
+// ==================== CHARACTER EDITOR ====================
+let editorChars = [];
+let editorOriginals = [];
+
+async function openCharEditor() {
+  openEditor(); // switch to editor submenu
+  document.getElementById('mainMenu').style.display = 'none';
+  const ov = document.getElementById('editorOverlay');
+  ov.classList.add('show');
+  const grid = document.getElementById('editorGrid');
+  grid.innerHTML = '<div style="color:#888;padding:40px;text-align:center">加载武将数据中...</div>';
+  try {
+    const res = await fetch('characters.json');
+    const data = await res.json();
+    editorOriginals = data.map(c => JSON.parse(JSON.stringify(c)));
+    editorChars = data.map(c => JSON.parse(JSON.stringify(c)));
+    recalcRatings(editorOriginals);
+    recalcRatings(editorChars);
+    renderEditorGrid();
+  } catch (e) {
+    grid.innerHTML = `<div style="color:#e94560;padding:40px;text-align:center">加载失败: ${e.message}</div>`;
+  }
+}
+
+function closeCharEditor() {
+  document.getElementById('editorOverlay').classList.remove('show');
+  document.getElementById('mainMenu').style.display = 'flex';
+  // Restore original editor header
+  const hdr = document.querySelector('#editorOverlay .editor-hdr');
+  if (hdr) hdr.innerHTML = `<h2>✏️ 编辑现有武将</h2>
+    <div class="editor-hdr-btns">
+      <button class="btn btn-outline btn-small" onclick="saveCharEdits()">保存</button>
+      <button class="btn btn-outline btn-small" onclick="resetAllEdits()">恢复全部</button>
+      <button class="btn btn-outline btn-small" onclick="closeCharEditor()">返回</button>
+    </div>`;
+}
+
+function renderEditorGrid() {
+  const grid = document.getElementById('editorGrid');
+  grid.innerHTML = editorChars.map((c, i) => {
+    const orig = editorOriginals[i];
+    const changed = c.leadership !== orig.leadership || c.martial !== orig.martial ||
+      c.intelligence !== orig.intelligence || c.politics !== orig.politics ||
+      c.type !== orig.type;
+    return `<div class="ec-card${changed ? ' ec-changed' : ''}">
+      <div class="ec-id">#${c.id}</div>
+      <div class="ec-avatar-row"><img class="ec-avatar" src="${generateAvatar(c, 64)}"></div>
+      <div class="ec-name-static">${escHtml(c.name)}</div>
+      <div class="ec-field"><span class="ec-label">类</span>
+        <select class="ec-input ec-type" data-idx="${i}">${['全能','文臣','武将','特才'].map(t => `<option${t===c.type?' selected':''}>${t}</option>`).join('')}</select>
+      </div>
+      <div class="ec-field"><span class="ec-label">评</span><span class="ec-rating-static" style="color:${RATING_COLORS[c.rating]||'#ccc'}">${c.rating}</span></div>
+      <div class="ec-field"><span class="ec-label">统</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="leadership" type="number" min="0" max="100" value="${c.leadership}"></div>
+      <div class="ec-field"><span class="ec-label">武</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="martial" type="number" min="0" max="100" value="${c.martial}"></div>
+      <div class="ec-field"><span class="ec-label">智</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="intelligence" type="number" min="0" max="100" value="${c.intelligence}"></div>
+      <div class="ec-field"><span class="ec-label">政</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="politics" type="number" min="0" max="100" value="${c.politics}"></div>
+      <div class="ec-total">总分 ${c.leadership + c.martial + c.intelligence + c.politics}</div>
+      <button class="ec-btn${changed ? '' : ' ec-btn-disabled'}" data-idx="${i}" onclick="restoreChar(${i})">恢复</button>
+    </div>`;
+  }).join('');
+  // Attach input listeners
+  grid.querySelectorAll('.ec-stat').forEach(el => {
+    el.addEventListener('input', onStatChange);
+  });
+  grid.querySelectorAll('.ec-type').forEach(el => {
+    el.addEventListener('change', onSelectChange);
+  });
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function onStatChange(e) {
+  const el = e.target;
+  const idx = parseInt(el.dataset.idx);
+  const stat = el.dataset.stat;
+  const v = parseInt(el.value) || 0;
+  editorChars[idx][stat] = Math.max(0, Math.min(100, v));
+  renderEditorGrid();
+}
+
+function onSelectChange(e) {
+  const el = e.target;
+  const idx = parseInt(el.dataset.idx);
+  editorChars[idx].type = el.value;
+  renderEditorGrid();
+}
+
+function restoreChar(idx) {
+  editorChars[idx] = JSON.parse(JSON.stringify(editorOriginals[idx]));
+  renderEditorGrid();
+}
+
+function recalcRatings(chars) {
+  const splus = new Set();
+  for (const c of chars) {
+    if (c.leadership === 100 || c.martial === 100 || c.intelligence === 100 || c.politics === 100) {
+      splus.add(c.id);
+    }
+  }
+  const rest = chars.filter(c => !splus.has(c.id));
+  rest.sort((a, b) => (b.leadership + b.martial + b.intelligence + b.politics) -
+                      (a.leadership + a.martial + a.intelligence + a.politics));
+  const n = rest.length;
+  const tiers = [
+    [1/11, 'S'], [3/11, 'A'], [5/11, 'B'], [8/11, 'C'], [1, 'D'],
+  ];
+  for (let i = 0; i < n; i++) {
+    const p = i / n;
+    rest[i].rating = tiers.find(t => p < t[0])?.[1] || 'D';
+  }
+  for (const c of chars) {
+    if (splus.has(c.id)) c.rating = 'S+';
+  }
+}
+
+async function saveCharEdits() {
+  recalcRatings(editorChars);
+  renderEditorGrid();
+  try {
+    const r = await fetch('/api/characters/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({characters: editorChars})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      addBattleLog(`已保存 ${d.saved} 名武将的修改至游戏中`, 'win');
+      if (!window._toast) { window._toast = document.createElement('div'); window._toast.className = 'toast-msg'; document.body.appendChild(window._toast); }
+      window._toast.textContent = `✓ 已保存 ${d.saved} 名武将的修改`;
+      window._toast.classList.add('show');
+      setTimeout(() => window._toast.classList.remove('show'), 2000);
+    }
+  } catch (e) {
+    addBattleLog(`保存失败: ${e.message}`, 'lose');
+    if (!window._toast) { window._toast = document.createElement('div'); window._toast.className = 'toast-msg'; document.body.appendChild(window._toast); }
+    window._toast.textContent = '✗ 保存失败: ' + e.message;
+    window._toast.classList.add('show');
+    setTimeout(() => window._toast.classList.remove('show'), 3000);
+  }
+}
+
+async function resetAllEdits() {
+  if (!confirm('确认恢复全部武将至原始数据？此操作将清除所有保存的修改。')) return;
+  try {
+    const r = await fetch('/api/characters/reset-all', {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      // Reset local editor data to originals
+      editorChars = editorOriginals.map(c => JSON.parse(JSON.stringify(c)));
+      renderEditorGrid();
+      addBattleLog('已清除所有修改，游戏将使用原始武将数据', 'win');
+      if (!window._toast) { window._toast = document.createElement('div'); window._toast.className = 'toast-msg'; document.body.appendChild(window._toast); }
+      window._toast.textContent = '✓ 已恢复全部武将至原始数据';
+      window._toast.classList.add('show');
+      setTimeout(() => window._toast.classList.remove('show'), 2000);
+    }
+  } catch (e) {
+    addBattleLog(`恢复失败: ${e.message}`, 'lose');
+  }
+}
+
+// Random poster background on load
+(function initMenuBg() {
+  const n = Math.floor(Math.random() * 3) + 1;
+  const bg = document.createElement('div');
+  bg.className = 'main-menu-bg';
+  bg.style.backgroundImage = `url(posters/${n}.webp)`;
+  document.getElementById('mainMenu').insertBefore(bg, document.getElementById('mainMenu').firstChild);
+})();
+
 async function startSinglePlayer() {
   document.getElementById('mainMenu').style.display = 'none';
   document.getElementById('gameHeader').style.display = 'flex';
@@ -959,6 +1221,216 @@ async function startSinglePlayer() {
     addBattleLog('连接服务器失败：' + e.message, 'lose');
     setPhase('⚠ 无法连接服务器');
   }
+}
+
+// ==================== CUSTOM GENERAL EDITOR ====================
+let cgSelectedAvatar = 501;
+let cgEditingId = null; // null = new creation
+
+function openCustomEditor(editId) {
+  openEditor();
+  document.getElementById('mainMenu').style.display = 'none';
+  const ov = document.getElementById('customEditorOverlay');
+  ov.classList.add('show');
+  cgEditingId = editId || null;
+  renderAvatarGrid();
+  // Populate fields if editing
+  if (editId) {
+    Promise.resolve().then(() => loadCustomGeneralForEdit(editId));
+  } else {
+    resetCustomForm();
+  }
+  // Listen for stat changes to update total
+  document.querySelectorAll('#customEditorOverlay .cg-stat').forEach(el => {
+    el.addEventListener('input', updateCgTotal);
+  });
+  document.getElementById('cgName').addEventListener('input', updateCgPreview);
+  document.querySelectorAll('#customEditorOverlay .cg-stat, #cgType').forEach(el => {
+    el.addEventListener('change', updateCgPreview);
+  });
+}
+
+function closeCustomEditor() {
+  document.getElementById('customEditorOverlay').classList.remove('show');
+  document.getElementById('mainMenu').style.display = 'flex';
+}
+
+function resetCustomForm() {
+  cgSelectedAvatar = 501;
+  document.getElementById('cgName').value = '';
+  document.getElementById('cgType').value = '全能';
+  document.getElementById('cgLead').value = 50;
+  document.getElementById('cgMar').value = 50;
+  document.getElementById('cgInt').value = 50;
+  document.getElementById('cgPol').value = 50;
+  updateCgTotal();
+  renderAvatarGrid();
+  updateCgPreview();
+}
+
+function renderAvatarGrid() {
+  const grid = document.getElementById('cgAvatarGrid');
+  grid.innerHTML = '';
+  for (let id = 501; id <= 520; id++) {
+    const img = document.createElement('img');
+    img.className = 'cg-avatar-opt' + (id === cgSelectedAvatar ? ' selected' : '');
+    img.src = `portraits/${id}.webp`;
+    img.onclick = () => { cgSelectedAvatar = id; renderAvatarGrid(); updateCgPreview(); };
+    grid.appendChild(img);
+  }
+}
+
+function updateCgTotal() {
+  const ld = parseInt(document.getElementById('cgLead').value) || 0;
+  const mr = parseInt(document.getElementById('cgMar').value) || 0;
+  const it = parseInt(document.getElementById('cgInt').value) || 0;
+  const po = parseInt(document.getElementById('cgPol').value) || 0;
+  document.getElementById('cgTotal').textContent = `总分 ${ld + mr + it + po}`;
+}
+
+function updateCgPreview() {
+  const name = document.getElementById('cgName').value || '未命名';
+  const type = document.getElementById('cgType').value;
+  const ld = parseInt(document.getElementById('cgLead').value) || 0;
+  const mr = parseInt(document.getElementById('cgMar').value) || 0;
+  const it = parseInt(document.getElementById('cgInt').value) || 0;
+  const po = parseInt(document.getElementById('cgPol').value) || 0;
+  const total = ld + mr + it + po;
+  const char = { id: cgEditingId || 9999, name, type, leadership: ld, martial: mr, intelligence: it, politics: po, rating: 'C' };
+  const pv = document.getElementById('cgPreview');
+  pv.innerHTML = `<img class="cg-prev-avatar" src="${generateAvatar(char, 48)}">
+    <div class="cg-prev-info">
+      <div style="font-weight:600;color:#f5a623">${escHtml(name)}</div>
+      <div>${type} · 统${ld} 武${mr} 智${it} 政${po} · 总分${total}</div>
+    </div>`;
+}
+
+async function loadCustomGeneralForEdit(id) {
+  try {
+    const r = await fetch('/api/characters/custom');
+    const d = await r.json();
+    const g = d.generals.find(x => x.id === id);
+    if (!g) { showToast('未找到该武将', 'error'); return; }
+    document.getElementById('cgName').value = g.name || '';
+    document.getElementById('cgType').value = g.type || '全能';
+    document.getElementById('cgLead').value = g.leadership || 50;
+    document.getElementById('cgMar').value = g.martial || 50;
+    document.getElementById('cgInt').value = g.intelligence || 50;
+    document.getElementById('cgPol').value = g.politics || 50;
+    cgSelectedAvatar = g.avatarId || 501;
+    renderAvatarGrid();
+    updateCgTotal();
+    updateCgPreview();
+  } catch (e) {
+    showToast('加载失败: ' + e.message, 'error');
+  }
+}
+
+async function saveCustomGeneral() {
+  const name = document.getElementById('cgName').value.trim();
+  if (!name) { showToast('请输入武将姓名', 'error'); return; }
+  const type = document.getElementById('cgType').value;
+  const ld = Math.min(100, Math.max(0, parseInt(document.getElementById('cgLead').value) || 0));
+  const mr = Math.min(100, Math.max(0, parseInt(document.getElementById('cgMar').value) || 0));
+  const it = Math.min(100, Math.max(0, parseInt(document.getElementById('cgInt').value) || 0));
+  const po = Math.min(100, Math.max(0, parseInt(document.getElementById('cgPol').value) || 0));
+  const total = ld + mr + it + po;
+  // Determine rating
+  let rating = 'C';
+  if (ld === 100 || mr === 100 || it === 100 || po === 100) rating = 'S+';
+  else if (total >= 360) rating = 'S';
+  else if (total >= 330) rating = 'A';
+  else if (total >= 300) rating = 'B';
+  else if (total >= 270) rating = 'C';
+  else rating = 'D';
+
+  const generals = [];
+  // Load existing custom generals from server
+  try {
+    const r = await fetch('/api/characters/custom');
+    const d = await r.json();
+    generals.push(...d.generals);
+  } catch (_) {}
+  // Remove existing entry with same id, or generate new id
+  if (cgEditingId) {
+    const idx = generals.findIndex(x => x.id === cgEditingId);
+    if (idx >= 0) generals.splice(idx, 1);
+  } else {
+    cgEditingId = 501; // find next available id
+    const used = new Set(generals.map(x => x.id));
+    while (used.has(cgEditingId)) cgEditingId++;
+  }
+  const entry = {
+    id: cgEditingId,
+    name, type,
+    leadership: ld, martial: mr, intelligence: it, politics: po,
+    total_score: total, rating,
+    avatarId: cgSelectedAvatar,
+  };
+  generals.push(entry);
+  try {
+    const r = await fetch('/api/characters/custom/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({generals})
+    });
+    const res = await r.json();
+    if (res.ok) {
+      showToast(`✓ 已保存武将「${name}」`);
+      // Update preview with final id
+      updateCgPreview();
+    }
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
+}
+
+async function listCustomGenerals() {
+  openEditor();
+  document.getElementById('mainMenu').style.display = 'none';
+  try {
+    const r = await fetch('/api/characters/custom');
+    const d = await r.json();
+    const list = d.generals || [];
+    if (list.length === 0) {
+      showToast('暂无自建武将，请先创建');
+      document.getElementById('mainMenu').style.display = 'flex';
+      return;
+    }
+    // Show a simple selection overlay (reuse existing overlay approach)
+    const ov = document.getElementById('editorOverlay');
+    ov.classList.add('show');
+    const grid = document.getElementById('editorGrid');
+    grid.innerHTML = `<div style="font-size:12px;color:#888;padding:4px 8px">点击武将进行编辑</div>`;
+    grid.innerHTML += list.map(g => {
+      const total = (g.leadership||0)+(g.martial||0)+(g.intelligence||0)+(g.politics||0);
+      return `<div class="ec-card" style="cursor:pointer" onclick="openCustomEditor(${g.id})">
+        <div class="ec-id">#${g.id}</div>
+        <div class="ec-avatar-row"><img class="ec-avatar" src="${generateAvatar({id:g.avatarId||g.id,name:g.name,rating:g.rating||'C',type:g.type||'全能'}, 48)}"></div>
+        <div class="ec-name-static">${escHtml(g.name)}</div>
+        <div class="ec-field"><span class="ec-label">类</span><span>${g.type||'全能'}</span></div>
+        <div class="ec-field"><span class="ec-label">评</span><span style="color:${RATING_COLORS[g.rating]||'#ccc'}">${g.rating||'C'}</span></div>
+        <div style="font-size:10px;color:#888;margin-top:4px">统${g.leadership} 武${g.martial} 智${g.intelligence} 政${g.politics}</div>
+        <div style="font-size:9px;color:#4fc3f7">总分 ${total}</div>
+      </div>`;
+    }).join('');
+    // Add a close button to the editor header
+    const hdr = document.querySelector('#editorOverlay .editor-hdr');
+    hdr.innerHTML = `<h2>📝 编辑自建武将</h2>
+      <div class="editor-hdr-btns">
+        <button class="btn btn-outline btn-small" onclick="closeCharEditor()">返回</button>
+      </div>`;
+  } catch (e) {
+    showToast('加载失败: ' + e.message, 'error');
+  }
+}
+
+function showToast(msg, type) {
+  if (!window._toast) { window._toast = document.createElement('div'); window._toast.className = 'toast-msg'; document.body.appendChild(window._toast); }
+  window._toast.style.background = type === 'error' ? 'rgba(233,69,96,.9)' : 'rgba(46,204,113,.9)';
+  window._toast.textContent = msg;
+  window._toast.classList.add('show');
+  setTimeout(() => window._toast.classList.remove('show'), 2500);
 }
 
 // ==================== INIT (no-op; game starts via menu) ====================

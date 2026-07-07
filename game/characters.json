@@ -14,7 +14,9 @@
     "wu_rating": "A",
     "wen_rating": "S",
     "total_rating": "S+",
-    "type": "全能"
+    "type": "全能",
+    "identity": "大名",
+    "note": "尾张、美浓霸主，天下人"
   },
   {
     "id": 2,
@@ -31,7 +33,9 @@
     "wu_rating": "S",
     "wen_rating": "S",
     "total_rating": "S+",
-    "type": "全能"
+    "type": "全能",
+    "identity": "大名",
+    "note": "甲斐守护，甲斐国领主"
   },
   {
     "id": 3,
@@ -48,7 +52,9 @@
     "wu_rating": "A",
     "wen_rating": "S",
     "total_rating": "S",
-    "type": "全能"
+    "type": "全能",
+    "identity": "大名",
+    "note": "后北条初代，伊豆、相模领主"
   },
   {
     "id": 4,
@@ -65,7 +71,9 @@
     "wu_rating": "S",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "全能"
+    "type": "全能",
+    "identity": "大名",
+    "note": "三河、关东领主，幕府开创者"
   },
   {
     "id": 5,
@@ -82,7 +90,9 @@
     "wu_rating": "A",
     "wen_rating": "S",
     "total_rating": "S+",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "安艺毛利，西国霸主"
   },
   {
     "id": 6,
@@ -99,7 +109,9 @@
     "wu_rating": "A",
     "wen_rating": "S",
     "total_rating": "S",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "统一日本，关白"
   },
   {
     "id": 7,
@@ -116,7 +128,9 @@
     "wu_rating": "A",
     "wen_rating": "S",
     "total_rating": "S",
-    "type": "全能"
+    "type": "全能",
+    "identity": "非大名",
+    "note": "织田家重臣，近江城主，无独立领国"
   },
   {
     "id": 8,
@@ -133,7 +147,9 @@
     "wu_rating": "A",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "全能"
+    "type": "全能",
+    "identity": "大名",
+    "note": "关东后北条鼎盛家督"
   },
   {
     "id": 9,
@@ -150,7 +166,9 @@
     "wu_rating": "S",
     "wen_rating": "B",
     "total_rating": "S+",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "越后长尾，越后国守护"
   },
   {
     "id": 10,
@@ -167,7 +185,9 @@
     "wu_rating": "A",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "陆奥伊达家督，奥羽大名"
   },
   {
     "id": 11,
@@ -184,7 +204,9 @@
     "wu_rating": "A",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "全能"
+    "type": "全能",
+    "identity": "大名",
+    "note": "后北条二代相模领主"
   },
   {
     "id": 12,
@@ -201,7 +223,9 @@
     "wu_rating": "B",
     "wen_rating": "S",
     "total_rating": "S",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "骏河、远江今川家督"
   },
   {
     "id": 13,
@@ -218,7 +242,9 @@
     "wu_rating": "B",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "上田独立城主，割据小大名"
   },
   {
     "id": 14,
@@ -235,7 +261,9 @@
     "wu_rating": "A",
     "wen_rating": "B",
     "total_rating": "S",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "四国土佐统一领主"
   },
   {
     "id": 15,
@@ -252,7 +280,9 @@
     "wu_rating": "S",
     "wen_rating": "C",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "萨摩岛津核心家督，一国领主"
   },
   {
     "id": 16,
@@ -269,7 +299,9 @@
     "wu_rating": "B",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "美浓国霸主，美浓守护代"
   },
   {
     "id": 17,
@@ -286,7 +318,9 @@
     "wu_rating": "B",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "毛利家分家重臣，依附毛利"
   },
   {
     "id": 18,
@@ -303,7 +337,9 @@
     "wu_rating": "A",
     "wen_rating": "B",
     "total_rating": "S",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "丰臣家军师，后封藩，战国时期属家臣"
   },
   {
     "id": 19,
@@ -320,7 +356,9 @@
     "wu_rating": "A",
     "wen_rating": "B",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "山形最上氏领主"
   },
   {
     "id": 20,
@@ -337,7 +375,9 @@
     "wu_rating": "A",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "大友家重臣，筑前城主"
   },
   {
     "id": 21,
@@ -354,7 +394,9 @@
     "wu_rating": "B",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "出云尼子初代霸主"
   },
   {
     "id": 22,
@@ -371,7 +413,9 @@
     "wu_rating": "B",
     "wen_rating": "A",
     "total_rating": "A",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "龙造寺家重臣，后封藩，战国为家臣"
   },
   {
     "id": 23,
@@ -388,7 +432,9 @@
     "wu_rating": "D",
     "wen_rating": "S",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "今川家首席军师，依附今川"
   },
   {
     "id": 24,
@@ -405,7 +451,9 @@
     "wu_rating": "C",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "备前独立领主，下克上大名"
   },
   {
     "id": 25,
@@ -422,7 +470,9 @@
     "wu_rating": "A",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "毛利分家重臣，毛利麾下"
   },
   {
     "id": 26,
@@ -439,7 +489,9 @@
     "wu_rating": "A",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "肥前龙造寺领主"
   },
   {
     "id": 27,
@@ -456,7 +508,9 @@
     "wu_rating": "B",
     "wen_rating": "B",
     "total_rating": "A",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "伊达政宗贴身家臣"
   },
   {
     "id": 28,
@@ -473,7 +527,9 @@
     "wu_rating": "C",
     "wen_rating": "A",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "周防大内西国霸主"
   },
   {
     "id": 29,
@@ -490,7 +546,9 @@
     "wu_rating": "S",
     "wen_rating": "D",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "德川家第一猛将，家臣"
   },
   {
     "id": 30,
@@ -507,7 +565,9 @@
     "wu_rating": "A",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "萨摩岛津分家领主"
   },
   {
     "id": 31,
@@ -524,7 +584,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "S",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "武田家重臣，依附武田"
   },
   {
     "id": 32,
@@ -541,7 +603,9 @@
     "wu_rating": "A",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "近江蒲生藩领主，独立大名"
   },
   {
     "id": 33,
@@ -558,7 +622,9 @@
     "wu_rating": "C",
     "wen_rating": "A",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "丰臣连襟家臣，受封领地但依附丰臣政权"
   },
   {
     "id": 34,
@@ -575,7 +641,9 @@
     "wu_rating": "C",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "丹后细川独立领主"
   },
   {
     "id": 35,
@@ -592,7 +660,9 @@
     "wu_rating": "D",
     "wen_rating": "A",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "丰臣家奉行，家臣"
   },
   {
     "id": 36,
@@ -609,7 +679,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "丰后大友国领主"
   },
   {
     "id": 37,
@@ -626,7 +698,9 @@
     "wu_rating": "B",
     "wen_rating": "B",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "奥羽津轻独立领主"
   },
   {
     "id": 38,
@@ -643,7 +717,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "辗转多家的家臣，江户才成藩主"
   },
   {
     "id": 39,
@@ -660,7 +736,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "奥羽南部氏领主"
   },
   {
     "id": 40,
@@ -677,7 +755,9 @@
     "wu_rating": "A",
     "wen_rating": "D",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "织田家头号重臣，依附织田"
   },
   {
     "id": 41,
@@ -694,7 +774,9 @@
     "wu_rating": "A",
     "wen_rating": "D",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "筑后立花藩独立领主"
   },
   {
     "id": 42,
@@ -711,7 +793,9 @@
     "wu_rating": "A",
     "wen_rating": "D",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "加贺前田藩初代大名"
   },
   {
     "id": 43,
@@ -728,7 +812,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "上野长野家重臣，依附长野氏"
   },
   {
     "id": 44,
@@ -745,7 +831,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "织田家关东管领，织田家臣"
   },
   {
     "id": 45,
@@ -762,7 +850,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "一向宗宗教割据势力，独立武装领主"
   },
   {
     "id": 46,
@@ -779,7 +869,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "三好氏前期掌权领主，畿内割据"
   },
   {
     "id": 47,
@@ -796,7 +888,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "长宗我部家臣"
   },
   {
     "id": 48,
@@ -813,7 +907,9 @@
     "wu_rating": "A",
     "wen_rating": "D",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "丰臣家武将，江户才获藩地"
   },
   {
     "id": 49,
@@ -830,7 +926,9 @@
     "wu_rating": "A",
     "wen_rating": "D",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "近江浅井国领主"
   },
   {
     "id": 50,
@@ -847,7 +945,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "丰臣家奉行家臣"
   },
   {
     "id": 51,
@@ -864,7 +964,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "筑前黑田藩领主"
   },
   {
     "id": 52,
@@ -881,7 +983,9 @@
     "wu_rating": "A",
     "wen_rating": "D",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "丰臣嫡系武将，江户为藩主，战国属家臣"
   },
   {
     "id": 53,
@@ -898,7 +1002,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "大友家重臣，立花道雪女婿"
   },
   {
     "id": 54,
@@ -915,7 +1021,9 @@
     "wu_rating": "A",
     "wen_rating": "D",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "上杉谦信麾下头号猛将"
   },
   {
     "id": 55,
@@ -932,7 +1040,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "上田、松代藩领主"
   },
   {
     "id": 56,
@@ -949,7 +1059,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "毛利家末代西国霸主"
   },
   {
     "id": 57,
@@ -966,7 +1078,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "室町末期山名守护，战国前期大名"
   },
   {
     "id": 58,
@@ -983,7 +1097,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "近江六角氏鼎盛领主"
   },
   {
     "id": 59,
@@ -1000,7 +1116,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "伊达政宗祖父，陆奥伊达家督"
   },
   {
     "id": 60,
@@ -1017,7 +1135,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "越前朝仓初代强盛家督"
   },
   {
     "id": 61,
@@ -1034,7 +1154,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "织田家下属城主，家臣"
   },
   {
     "id": 62,
@@ -1051,7 +1173,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "萨摩岛津统一全境的家督"
   },
   {
     "id": 63,
@@ -1068,7 +1192,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "织田谱代重臣"
   },
   {
     "id": 64,
@@ -1085,7 +1211,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "A",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "岛津氏初代奠基领主"
   },
   {
     "id": 65,
@@ -1102,7 +1230,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "陆奥伊达前代家督"
   },
   {
     "id": 66,
@@ -1119,7 +1249,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "丰臣秀吉起家家臣"
   },
   {
     "id": 67,
@@ -1136,7 +1268,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "织田水军统领，依附主君"
   },
   {
     "id": 68,
@@ -1153,7 +1287,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "上杉景胜执政家臣"
   },
   {
     "id": 69,
@@ -1170,7 +1306,9 @@
     "wu_rating": "D",
     "wen_rating": "B",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "织田家军师，家臣"
   },
   {
     "id": 70,
@@ -1187,7 +1325,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "武田家下层武士"
   },
   {
     "id": 71,
@@ -1204,7 +1344,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "最上义光之父，山形领主"
   },
   {
     "id": 72,
@@ -1221,7 +1363,9 @@
     "wu_rating": "C",
     "wen_rating": "B",
     "total_rating": "A",
-    "type": "特才"
+    "type": "特才",
+    "identity": "大名",
+    "note": "大和独立城主，下克上割据大名"
   },
   {
     "id": 73,
@@ -1238,7 +1382,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "越后上杉末代家督"
   },
   {
     "id": 74,
@@ -1255,7 +1401,9 @@
     "wu_rating": "D",
     "wen_rating": "B",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "毛利元就之父，安艺毛利领主"
   },
   {
     "id": 75,
@@ -1272,7 +1420,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "常陆佐竹氏霸主"
   },
   {
     "id": 76,
@@ -1289,7 +1439,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "北条家赤备猛将，家臣"
   },
   {
     "id": 77,
@@ -1306,7 +1458,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "大内家重臣，后反叛"
   },
   {
     "id": 78,
@@ -1323,7 +1477,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "大内氏前期周防领主"
   },
   {
     "id": 79,
@@ -1340,7 +1496,9 @@
     "wu_rating": "B",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "丰臣麾下小早川藩领主"
   },
   {
     "id": 80,
@@ -1357,7 +1515,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "下总结城氏领主"
   },
   {
     "id": 81,
@@ -1374,7 +1534,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "备前宇喜多末代领主"
   },
   {
     "id": 82,
@@ -1391,7 +1553,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "丰后大友家督"
   },
   {
     "id": 83,
@@ -1408,7 +1572,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "会津芦名氏霸主"
   },
   {
     "id": 84,
@@ -1425,7 +1591,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "伊达氏分家领主"
   },
   {
     "id": 85,
@@ -1442,7 +1610,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "地方小城主依附大名"
   },
   {
     "id": 86,
@@ -1459,7 +1629,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "近江六角中期家督"
   },
   {
     "id": 87,
@@ -1476,7 +1648,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "安房里见氏领主"
   },
   {
     "id": 88,
@@ -1493,7 +1667,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "山形最上氏鼎盛家督"
   },
   {
     "id": 89,
@@ -1510,7 +1686,9 @@
     "wu_rating": "D",
     "wen_rating": "B",
     "total_rating": "A",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "北条氏长老家臣谋士"
   },
   {
     "id": 90,
@@ -1527,7 +1705,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "畿内三好政权最高领袖"
   },
   {
     "id": 91,
@@ -1544,7 +1724,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "非大名",
+    "note": "武田信玄亲弟，家臣武将"
   },
   {
     "id": 92,
@@ -1561,7 +1743,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "S",
-    "type": "特才"
+    "type": "特才",
+    "identity": "非大名",
+    "note": "前田家浪人武士，家臣出身"
   },
   {
     "id": 93,
@@ -1578,7 +1762,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "岛津义久、义弘之父，萨摩领主"
   },
   {
     "id": 94,
@@ -1595,7 +1781,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "肥后相良氏领主"
   },
   {
     "id": 95,
@@ -1612,7 +1800,9 @@
     "wu_rating": "D",
     "wen_rating": "B",
     "total_rating": "B",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "越前朝仓末代家督"
   },
   {
     "id": 96,
@@ -1629,7 +1819,9 @@
     "wu_rating": "B",
     "wen_rating": "D",
     "total_rating": "B",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "信浓北部村上独立大名"
   },
   {
     "id": 97,
@@ -1646,7 +1838,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "常陆小田氏末代领主"
   },
   {
     "id": 98,
@@ -1663,7 +1857,9 @@
     "wu_rating": "A",
     "wen_rating": "D",
     "total_rating": "A",
-    "type": "武将"
+    "type": "武将",
+    "identity": "大名",
+    "note": "甲斐武田末代家督"
   },
   {
     "id": 99,
@@ -1680,7 +1876,9 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "大名",
+    "note": "近江六角末代家督"
   },
   {
     "id": 100,
@@ -1697,6 +1895,8 @@
     "wu_rating": "C",
     "wen_rating": "C",
     "total_rating": "C",
-    "type": "文臣"
+    "type": "文臣",
+    "identity": "非大名",
+    "note": "蒲生氏乡同族家臣"
   }
 ]

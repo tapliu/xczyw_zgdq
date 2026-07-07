@@ -10,15 +10,21 @@
 
 <!-- 主菜单 -->
 <div class="main-menu" id="mainMenu">
-  <div class="menu-container">
+  <div class="menu-container" id="menuContainer">
     <div class="menu-title">信长之野望<span class="title-sub">战国夺旗</span></div>
     <div class="menu-subtitle">— 兵者，诡道也 —</div>
-    <div class="menu-buttons">
+    <div class="menu-buttons" id="menuButtons">
       <button class="menu-btn single" onclick="startSinglePlayer()"><span class="menu-icon">⚔</span> 单人模式</button>
       <button class="menu-btn" onclick="menuPlaceholder('多人模式')"><span class="menu-icon">👥</span> 多人模式</button>
-      <button class="menu-btn" onclick="menuPlaceholder('武将编辑')"><span class="menu-icon">📜</span> 武将编辑</button>
+      <button class="menu-btn" onclick="openEditor()"><span class="menu-icon">📜</span> 武将编辑</button>
       <button class="menu-btn" onclick="menuPlaceholder('游戏设置')"><span class="menu-icon">⚙</span> 游戏设置</button>
-      <button class="menu-btn quit" onclick="menuPlaceholder('退出游戏')"><span class="menu-icon">🚪</span> 退出游戏</button>
+      <button class="menu-btn quit" onclick="quitGame()"><span class="menu-icon">🚪</span> 退出游戏</button>
+    </div>
+    <div class="menu-buttons" id="editorButtons" style="display:none">
+      <button class="menu-btn" onclick="openCharEditor()"><span class="menu-icon">✏️</span> 编辑现有武将</button>
+      <button class="menu-btn" onclick="openCustomEditor()"><span class="menu-icon">🆕</span> 自建武将</button>
+      <button class="menu-btn" onclick="listCustomGenerals()"><span class="menu-icon">📝</span> 编辑自建武将</button>
+      <button class="menu-btn quit" onclick="closeEditor()" style="border-color:#555"><span class="menu-icon">🔙</span> 返回主菜单</button>
     </div>
     <div class="menu-footer">Powered by FastAPI · 战国风云 <span class="version-badge">v0.0.1</span></div>
   </div>
@@ -96,7 +102,7 @@
 
 <div class="troop-modal" id="pickModal">
 <div class="modal" style="max-width:560px">
-<h2>选择一张武将牌</h2>
+<div class="pick-hdr"><h2>选择一张武将牌</h2><button class="btn btn-outline btn-small" id="pickAutoBtn" onclick="autoPickCard()">🤖 自动</button></div>
 <div class="pick-grid" id="pickGrid"></div>
 </div>
 </div>
@@ -121,5 +127,57 @@
 
 <script src="js/api.js"></script>
 <script src="js/main.js"></script>
+
+<!-- 自建武将编辑器 -->
+<div class="editor-overlay" id="customEditorOverlay">
+  <div class="editor-screen">
+    <div class="editor-hdr">
+      <h2>✏️ 自建武将</h2>
+      <div class="editor-hdr-btns">
+        <button class="btn btn-outline btn-small" onclick="saveCustomGeneral()">保存</button>
+        <button class="btn btn-outline btn-small" onclick="closeCustomEditor()">返回</button>
+      </div>
+    </div>
+    <div class="cg-body">
+      <!-- 左侧：头像选择 -->
+      <div class="cg-left">
+        <div class="cg-section-title">选择头像</div>
+        <div class="cg-avatar-grid" id="cgAvatarGrid"></div>
+      </div>
+      <!-- 右侧：属性编辑 -->
+      <div class="cg-right">
+        <div class="cg-field"><span class="cg-label">姓名</span><input class="cg-input cg-name" id="cgName" placeholder="输入武将姓名"></div>
+        <div class="cg-field"><span class="cg-label">类型</span>
+          <select class="cg-input" id="cgType">${['全能','文臣','武将','特才'].map(t => `<option>${t}</option>`).join('')}</select>
+        </div>
+        <div class="cg-field"><span class="cg-label">统</span><input class="cg-input cg-stat" id="cgLead" type="number" min="0" max="100" value="50"></div>
+        <div class="cg-field"><span class="cg-label">武</span><input class="cg-input cg-stat" id="cgMar" type="number" min="0" max="100" value="50"></div>
+        <div class="cg-field"><span class="cg-label">智</span><input class="cg-input cg-stat" id="cgInt" type="number" min="0" max="100" value="50"></div>
+        <div class="cg-field"><span class="cg-label">政</span><input class="cg-input cg-stat" id="cgPol" type="number" min="0" max="100" value="50"></div>
+        <div class="cg-total" id="cgTotal">总分 200</div>
+        <div class="cg-actions">
+          <button class="btn btn-outline" onclick="saveCustomGeneral()">💾 保存武将</button>
+          <button class="btn btn-outline" onclick="closeCustomEditor()">返回</button>
+        </div>
+        <div class="cg-prev" id="cgPreview"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 武将编辑器 -->
+<div class="editor-overlay" id="editorOverlay">
+  <div class="editor-screen">
+    <div class="editor-hdr">
+      <h2>✏️ 编辑现有武将</h2>
+      <div class="editor-hdr-btns">
+        <button class="btn btn-outline btn-small" onclick="saveCharEdits()">保存</button>
+        <button class="btn btn-outline btn-small" onclick="resetAllEdits()">恢复全部</button>
+        <button class="btn btn-outline btn-small" onclick="closeCharEditor()">返回</button>
+      </div>
+    </div>
+    <div class="editor-grid" id="editorGrid"></div>
+  </div>
+</div>
 </body>
 </html>

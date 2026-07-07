@@ -51,6 +51,9 @@ def load_characters():
     with open(CHARACTERS_PATH, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+edited_characters = {}  # char_id -> modified char dict (saved by editor, not persisted to disk)
+custom_generals = {}    # char_id -> custom general dict
+
 
 def shuffle(arr):
     random.shuffle(arr)
@@ -364,9 +367,42 @@ class GameState:
         max_add = MAX_TOTAL_TROOPS - board_t - side.troops
         return max(0, min(income, max_add))
 
+    @staticmethod
+    def _apply_type_bonus(c):
+        typ = c.get('type', '')
+        # Save original values for frontend display
+        for k in ('leadership','martial','intelligence','politics'):
+            c['orig_' + k] = c.get(k, 0)
+        if typ == '全能':
+            for k in ('leadership','martial','intelligence','politics'):
+                c[k] = round(c.get(k,0) * 1.05)
+        elif typ == '文臣':
+            for k in ('intelligence','politics'):
+                c[k] = round(c.get(k,0) * 1.07)
+        elif typ == '武将':
+            for k in ('leadership','martial'):
+                c[k] = round(c.get(k,0) * 1.07)
+        elif typ == '特才':
+            best = max(('leadership','martial','intelligence','politics'), key=lambda k: c.get(k,0))
+            c[best] = round(c.get(best,0) * 1.10)
+
     def reset_game(self):
         all_chars = load_characters()
-        self.draw_pile = [deepcopy(c) for c in all_chars]
+        # Apply editor-saved modifications on top of original file data
+        for c in all_chars:
+            cid = c['id']
+            if cid in edited_characters:
+                c.update(edited_characters[cid])
+        # Apply type-based stat multipliers
+        for c in all_chars:
+            self._apply_type_bonus(c)
+        # Add custom generals to the pool
+        all_game_chars = list(all_chars)
+        for cg in custom_generals.values():
+            cg_copy = deepcopy(cg)
+            self._apply_type_bonus(cg_copy)
+            all_game_chars.append(cg_copy)
+        self.draw_pile = [deepcopy(c) for c in all_game_chars]
         shuffle(self.draw_pile)
         self.player = SideState()
         self.ai = SideState()
@@ -459,10 +495,20 @@ class GameState:
             self.pending_picks = 0
             self.draw_phase()
             return
-        options_count = min(3, len(self.draw_pile))
-        opts = self.draw_pile[:options_count]
-        self.draw_pile = self.draw_pile[options_count:]
-        self._pending_draw_options = opts
+        if self.pending_flag_picks > 0:
+            # Flag picks: only offer 大名 characters
+            daimyo = [c for c in self.draw_pile if c.get('identity') == '大名']
+            options_count = min(3, len(daimyo))
+            opts = daimyo[:options_count]
+            self._pending_draw_options = opts
+            # Remove picked daimyo from draw pile
+            picked_ids = {c['id'] for c in opts}
+            self.draw_pile = [c for c in self.draw_pile if c['id'] not in picked_ids]
+        else:
+            options_count = min(3, len(self.draw_pile))
+            opts = self.draw_pile[:options_count]
+            self.draw_pile = self.draw_pile[options_count:]
+            self._pending_draw_options = opts
         self.game_phase = 'pick_card'
 
     def pick_card(self, char_id):
@@ -476,6 +522,8 @@ class GameState:
         self.player.collection.append(selected)
         is_flag = self.pending_flag_picks > 0
         if is_flag:
+            if selected.get('identity') != '大名':
+                raise ValueError('旗本武将只能选择大名身份武将')
             self.player.flag_generals.append(deepcopy(selected))
             self.pending_flag_picks -= 1
             self._log(f'选择了旗本 {selected["name"]}（剩余{self.pending_flag_picks}名旗本待选）', 'win')
@@ -491,10 +539,12 @@ class GameState:
             return
         if self.round == 0:
             self._log('初始抽卡完成', 'info')
-            # AI gets 3 flag generals
-            ai_flag_count = min(FLAG_DRAW, len(self.draw_pile))
-            af_arr = self.draw_pile[:ai_flag_count]
-            self.draw_pile = self.draw_pile[ai_flag_count:]
+            # AI gets 3 flag generals (only 大名)
+            ai_daimyo = [c for c in self.draw_pile if c.get('identity') == '大名']
+            ai_flag_count = min(FLAG_DRAW, len(ai_daimyo))
+            af_arr = ai_daimyo[:ai_flag_count]
+            af_ids = {c['id'] for c in af_arr}
+            self.draw_pile = [c for c in self.draw_pile if c['id'] not in af_ids]
             for c in af_arr:
                 self.ai.flag_generals.append(deepcopy(c))
                 self.ai.collection.append(c)

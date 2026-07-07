@@ -3,6 +3,8 @@ import random
 import os
 from copy import deepcopy
 
+from . import relations
+
 CHARACTERS_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'game', 'characters.json')
 
 BOARD_ROWS = 8
@@ -175,16 +177,32 @@ class GameState:
     def _calc_power(self, index, is_player):
         my_board = self.player.board if is_player else self.ai.board
         en_board = self.ai.board if is_player else self.player.board
+        side = self.player if is_player else self.ai
         u = my_board[index]
         if not u:
             return 0
         flag_mul = 1.1 if self._is_flag_unit(index, is_player) else 1
         power = u.char['martial'] * 2 * flag_mul
         power *= (1 + u.troops / 30000)
+        u_factions = u.char.get('factions') or []
+        if not u_factions:
+            f = u.char.get('faction', '')
+            if f:
+                u_factions = [f]
+        has_qunxiong = '群雄' in u_factions
+        faction_bonus = 1.0
         for ni in self._get_neighbor_indices(index):
             nu = my_board[ni]
             if nu:
                 power += nu.char['leadership'] * 0.05
+                nf = nu.char.get('faction', '')
+                if nf and nf in u_factions:
+                    faction_bonus += 0.03 if has_qunxiong else 0.05
+            eu = en_board[ni]
+            if eu:
+                ef = eu.char.get('faction', '')
+                if ef and any(relations.is_hostile(uf, ef) for uf in u_factions):
+                    faction_bonus -= 0.05
         power += u.char['leadership'] * flag_mul * 0.05
         for ei in range(64):
             eu = en_board[ei]
@@ -193,6 +211,16 @@ class GameState:
             cone = self._get_cone_indices(ei, not is_player)
             if index in cone:
                 power -= eu.char['intelligence'] * 0.03
+        power *= faction_bonus
+        # Lord bonus: if this unit is the lord, each friendly same-faction unit on board adds 5%
+        is_lord = u.char.get('lord_name') == u.char.get('name')
+        if is_lord and not has_qunxiong:
+            faction_count = 0
+            for i in range(64):
+                fu = my_board[i]
+                if fu and fu is not u and fu.char.get('faction') in u_factions:
+                    faction_count += 1
+            power *= (1 + faction_count * 0.05)
         return max(1, round(power))
 
     def _calc_battle(self, p_unit, a_unit, p_power, a_power, ratio=1):
@@ -299,7 +327,8 @@ class GameState:
     def _stat_slot(self, uid):
         if uid not in self.combat_stats:
             self.combat_stats[uid] = {'damage': 0, 'meleeDmg': 0, 'rangedDmg': 0, 'meleeHits': 0, 'rangedHits': 0,
-                                      'kills': 0, 'retreatTriggers': 0, 'damage_to': {}, 'damage_from': {}}
+                                      'kills': 0, 'retreatTriggers': 0, 'damage_to': {}, 'damage_from': {},
+                                      'melee_hit_details': [], 'ranged_hit_details': []}
         return self.combat_stats[uid]
 
     def _record_melee(self, atk_uid, def_uid, dmg):
@@ -309,6 +338,7 @@ class GameState:
         s['meleeHits'] += 1
         sk = str(def_uid)
         s['damage_to'][sk] = s['damage_to'].get(sk, 0) + dmg
+        s['melee_hit_details'].append({'target': sk, 'dmg': dmg})
         t = self._stat_slot(def_uid)
         t['damage_from'][str(atk_uid)] = t['damage_from'].get(str(atk_uid), 0) + dmg
 
@@ -319,6 +349,7 @@ class GameState:
         s['rangedHits'] += 1
         sk = str(def_uid)
         s['damage_to'][sk] = s['damage_to'].get(sk, 0) + dmg
+        s['ranged_hit_details'].append({'target': sk, 'dmg': dmg})
         t = self._stat_slot(def_uid)
         t['damage_from'][str(atk_uid)] = t['damage_from'].get(str(atk_uid), 0) + dmg
 
@@ -388,6 +419,16 @@ class GameState:
 
     def reset_game(self):
         all_chars = load_characters()
+        # Attach default faction info from relation data (before edits, so edits can override)
+        for c in all_chars:
+            name = c.get('name', '')
+            cf = relations.get_faction(name)
+            if cf:
+                c['faction'] = cf
+                c['factions'] = relations.get_factions(name)
+            lord = relations.get_lord(cf) if cf else None
+            if lord:
+                c['lord_name'] = lord
         # Apply editor-saved modifications on top of original file data
         for c in all_chars:
             cid = c['id']
@@ -400,6 +441,14 @@ class GameState:
         all_game_chars = list(all_chars)
         for cg in custom_generals.values():
             cg_copy = deepcopy(cg)
+            if 'faction' not in cg_copy:
+                cf = relations.get_faction(cg_copy.get('name', ''))
+                if cf:
+                    cg_copy['faction'] = cf
+                    cg_copy['factions'] = relations.get_factions(cg_copy.get('name', ''))
+                lord = relations.get_lord(cf) if cf else None
+                if lord:
+                    cg_copy['lord_name'] = lord
             self._apply_type_bonus(cg_copy)
             all_game_chars.append(cg_copy)
         self.draw_pile = [deepcopy(c) for c in all_game_chars]

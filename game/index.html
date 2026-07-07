@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>信长之野望-战国夺旗</title>
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=3">
 </head>
 <body>
 
@@ -54,8 +54,7 @@
 <button class="btn btn-gold" id="btnDraw" onclick="drawPhase()">抽卡</button>
 <button class="btn btn-small" id="btnAutoPlace" onclick="toggleAutoPlay()">托管</button>
 <button class="btn btn-outline btn-small" id="btnEndTurn" onclick="endPlacement()">结束放置</button>
-<button class="btn btn-outline btn-small" onclick="resetGame()">重置</button>
-<button class="btn btn-outline btn-small" onclick="restartGame()">重新开始</button>
+<button class="btn btn-outline btn-small" onclick="restartGame()" style="border-color:#555;color:#999">重新开始</button>
 <button class="btn btn-outline btn-small" onclick="backToMenu()" style="margin-left:auto;border-color:#555;color:#999">返回主菜单</button>
 </div>
 </div>
@@ -101,7 +100,7 @@
 </div>
 
 <div class="troop-modal" id="pickModal">
-<div class="modal" style="max-width:560px">
+<div class="modal" style="max-width:700px">
 <div class="pick-hdr"><h2>选择一张武将牌</h2><button class="btn btn-outline btn-small" id="pickAutoBtn" onclick="autoPickCard()">🤖 自动</button></div>
 <div class="pick-grid" id="pickGrid"></div>
 </div>
@@ -126,8 +125,19 @@
 <div id="victoryOverlay"><div class="v-box"><div class="v-icon" id="vIcon"></div><div class="v-title" id="vTitle"></div><div class="v-sub" id="vSub"></div><div class="v-body"><div class="v-left"><div id="mvpDisplay" style="display:none"></div></div><div class="v-right"><div id="rankDisplay" class="v-rankings"></div></div></div><button class="v-btn" onclick="location.reload()">再来一局</button></div></div>
 
 <script src="js/api.js"></script>
-<script src="js/main.js"></script>
+<script src="js/main.js?v=3"></script>
 <script>
+// Populate faction dropdowns at page load
+(function(){
+  var sel = document.getElementById('cgFaction');
+  if (sel && !sel.options.length && typeof FACTION_NAMES !== 'undefined') {
+    FACTION_NAMES.forEach(function(f) {
+      var opt = document.createElement('option');
+      opt.value = f; opt.textContent = f;
+      sel.appendChild(opt);
+    });
+  }
+})();
 // Preload all portrait images into browser cache
 (function preloadPortraits() {
   const ids = [];
@@ -160,19 +170,21 @@
   <div class="editor-screen">
     <div class="editor-hdr">
       <h2>✏️ 自建武将</h2>
+      <div class="cg-actions">
+        <button class="btn btn-outline" onclick="saveCustomGeneral()">💾 保存武将</button>
+        <button class="btn btn-outline" onclick="closeCustomEditor()">返回</button>
+      </div>
     </div>
     <div class="cg-body">
       <!-- 左侧：头像选择 -->
       <div class="cg-left">
         <div class="cg-section-title">选择头像</div>
         <div class="cg-avatar-grid" id="cgAvatarGrid"></div>
-        <div class="cg-avatar-dropdown" id="cgAvatarDropdown">
-          <img id="cgAvatarDropdownImg" src="" alt="">
-        </div>
+
       </div>
       <!-- 右侧：属性编辑 -->
       <div class="cg-right">
-        <div class="cg-align-spacer"></div>
+        <div class="cg-selected-avatar" id="cgSelectedAvatar"><img src="" alt=""></div>
         <div class="cg-field"><span class="cg-label">姓名</span><input class="cg-input cg-name" id="cgName" placeholder="输入武将姓名"></div>
         <div class="cg-field"><span class="cg-label">类型</span>
           <select class="cg-input" id="cgType">
@@ -182,15 +194,14 @@
             <option>特才</option>
           </select>
         </div>
+        <div class="cg-field"><span class="cg-label">势力</span>
+          <select class="cg-input" id="cgFaction"></select>
+        </div>
         <div class="cg-field"><span class="cg-label">统</span><input class="cg-input cg-stat" id="cgLead" type="number" min="1" max="100" value="50"></div>
         <div class="cg-field"><span class="cg-label">武</span><input class="cg-input cg-stat" id="cgMar" type="number" min="1" max="100" value="50"></div>
         <div class="cg-field"><span class="cg-label">智</span><input class="cg-input cg-stat" id="cgInt" type="number" min="1" max="100" value="50"></div>
         <div class="cg-field"><span class="cg-label">政</span><input class="cg-input cg-stat" id="cgPol" type="number" min="1" max="100" value="50"></div>
         <div class="cg-total" id="cgTotal">总分 200</div>
-        <div class="cg-actions">
-          <button class="btn btn-outline" onclick="saveCustomGeneral()">💾 保存武将</button>
-          <button class="btn btn-outline" onclick="closeCustomEditor()">返回</button>
-        </div>
         <div class="cg-prev" id="cgPreview"></div>
       </div>
     </div>

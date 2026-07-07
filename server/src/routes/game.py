@@ -97,6 +97,8 @@ def end_turn(game_id: str):
         game.end_placement()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'{type(e).__name__}: {e}')
     return game.to_dict()
 
 
@@ -163,6 +165,7 @@ def save_characters(body: SaveCharactersRequest):
     for c in body.characters:
         cid = c.get('id')
         if cid is not None:
+            c.pop('factions', None)  # don't persist derived data
             edited_characters[cid] = c
     return {'saved': len(body.characters), 'ok': True}
 
@@ -199,3 +202,23 @@ def save_custom_generals(body: CustomGeneralRequest):
 @router.get('/characters/custom')
 def get_custom_generals():
     return {'generals': list(custom_generals.values())}
+
+
+# ---- Faction API ----
+from ..backend import relations
+
+
+@router.get('/factions/map')
+def get_faction_map():
+    from ..backend.state import load_characters
+    chars = load_characters()
+    result = {}
+    for c in chars:
+        name = c.get('name', '')
+        f = relations.get_faction(name)
+        if f:
+            result[name] = {
+                'primary': f,
+                'all': relations.get_factions(name),
+            }
+    return {'factions': result}

@@ -31,6 +31,46 @@ const RATING_COLORS = { 'S+':'#8b0000','S':'#e94560','A':'#8b4513','B':'#ffd700'
 const TYPE_COLORS = { '全能':'#f5a623','武将':'#e94560','文臣':'#3498db','特才':'#9b59b6' };
 const MON_CRESTS = ['◈','◆','★','✿','❖','⚘','✧','❀','✦','♰'];
 const CAT_NAMES = ['全能','武将','文臣','特才'];
+const FACTION_COLORS = {
+  '织田家':'#e94560','丰臣家':'#f5a623','德川家':'#4fc3f7','武田家':'#e91e63',
+  '上杉家':'#2196f3','北条家':'#9c27b0','毛利家':'#ff5722','岛津家':'#4caf50',
+  '伊达家':'#00bcd4','长宗我部家':'#8bc34a','龙造寺家':'#607d8b','大友家':'#795548',
+  '斋藤家':'#795548','今川家':'#ff9800','浅井家':'#cddc39','朝仓家':'#bdbdbd',
+  '本愿寺':'#9e9e9e','三好家':'#ffeb3b','尼子家':'#3f51b5','群雄':'#aaaaaa',
+};
+const FACTION_NAMES = Object.keys(FACTION_COLORS).sort();
+const FACTION_ENEMIES = {
+  '织田家': ['武田家', '上杉家', '毛利家', '今川家', '斋藤家', '浅井家', '朝仓家', '本愿寺'],
+  '丰臣家': ['北条家', '长宗我部家'],
+  '德川家': ['武田家'],
+  '武田家': ['上杉家', '织田家'],
+  '上杉家': ['武田家', '北条家', '织田家'],
+  '北条家': ['上杉家', '织田家', '丰臣家'],
+  '毛利家': ['织田家'],
+  '岛津家': ['龙造寺家', '大友家'],
+  '长宗我部家': ['织田家', '丰臣家'],
+  '龙造寺家': ['岛津家', '大友家'],
+  '大友家': ['岛津家', '龙造寺家'],
+  '斋藤家': ['织田家'],
+  '今川家': ['织田家'],
+  '浅井家': ['织田家'],
+  '朝仓家': ['织田家'],
+  '本愿寺': ['织田家'],
+  '群雄': [],
+};
+
+function getFactions(c) {
+  return c.factions && c.factions.length ? c.factions : (c.faction ? [c.faction] : []);
+}
+
+function renderFactionBadges(factions, sep) {
+  if (!factions || !factions.length) return '';
+  return factions.map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join(sep || '/');
+}
+
+function flagIcon(color) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="2" width="2.5" height="20" rx="1" fill="#888"/><polygon points="5.5,2 20,7 5.5,12" fill="${color}"/></svg>`;
+}
 
 // ==================== STATE ====================
 let gameId = null;
@@ -224,14 +264,17 @@ function renderBoardFull() {
         const pFlag = player.flagIdx === i, aFlag = ai.flagIdx === i;
         if (pFlag||aFlag) cell.classList.add('flag-cell');
         const pPower = Math.round(calcPower(i, true)), aPower2 = Math.round(calcPower(i, false));
-        cell.innerHTML = `<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,18)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?'<span class="u-flag">🏴</span>':''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?'<span class="u-flag">🏴</span>':''}${generateAvatar(au.char,18)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
+        const pfBadges = getFactions(pu.char).map(f => `<span class="bu-faction-badge player-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
+        const afBadges = getFactions(au.char).map(f => `<span class="bu-faction-badge ai-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
+        cell.innerHTML = `${pfBadges}${afBadges}<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,18)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?flagIcon('#ffd700'):''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?flagIcon('#4caf50'):''}${generateAvatar(au.char,18)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
       } else {
         const isFlag = (isPlayer && player.flagIdx === i) || (!isPlayer && ai.flagIdx === i);
         if (isFlag) cell.classList.add('flag-cell');
-        const flagIcon = isFlag ? '<span class="u-flag">🏴</span>' : '';
+        const flagIconSvg = isFlag ? `<span class="u-flag-abs">${flagIcon(isPlayer ? '#ffd700' : '#4caf50')}</span>` : '';
         const dirIcon = isPlayer ? '▲' : '▼';
         const power = Math.round(calcPower(i, isPlayer));
-        cell.innerHTML = `${flagIcon}<img class="u-avatar" src="${generateAvatar(u.char,24)}" alt="">
+        const fBadges = getFactions(u.char).map(f => `<span class="u-faction-badge" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
+        cell.innerHTML = `${fBadges}${flagIconSvg}<img class="u-avatar" src="${generateAvatar(u.char,24)}" alt="">
           <span class="u-name">${u.char.name}</span>
           <span class="u-power">${power}</span>
           <span class="u-troops">${u.troops.toLocaleString()}</span>
@@ -294,21 +337,53 @@ function isFlagUnit(idx, isPlayer) {
   return isPlayer ? player.flagIdx === idx : ai.flagIdx === idx;
 }
 
+function isHostileFaction(fa, fb) {
+  if (!fa || !fb || fa === fb) return false;
+  const enemies = FACTION_ENEMIES[fa];
+  return enemies ? enemies.includes(fb) : false;
+}
+
 function calcPower(index, isPlayer) {
   const myBoard = isPlayer ? player.board : ai.board;
   const enBoard = isPlayer ? ai.board : player.board;
+  const side = isPlayer ? player : ai;
   const u = myBoard[index];
   if (!u) return 0;
   const flagMul = isFlagUnit(index, isPlayer) ? 1.1 : 1;
   let power = u.char.martial * 2 * flagMul;
   power *= (1 + u.troops / 30000);
-  getNeighborIndices(index).forEach(ni => { const nu = myBoard[ni]; if (nu) power += nu.char.leadership * 0.05; });
+  let factionBonus = 1.0;
+  const uFactions = getFactions(u.char);
+  const hasQunxiong = uFactions.includes('群雄');
+  getNeighborIndices(index).forEach(ni => {
+    const nu = myBoard[ni];
+    if (nu) {
+      power += nu.char.leadership * 0.05;
+      const nf = nu.char.faction || '';
+      if (nf && uFactions.includes(nf)) factionBonus += hasQunxiong ? 0.03 : 0.05;
+    }
+    const eu = enBoard[ni];
+    if (eu) {
+      const ef = eu.char.faction || '';
+      if (ef && uFactions.some(uf => isHostileFaction(uf, ef))) factionBonus -= 0.05;
+    }
+  });
   power += u.char.leadership * flagMul * 0.05;
   for (let ei=0;ei<64;ei++) {
     const eu = enBoard[ei];
     if (!eu) continue;
     const cone = getConeIndices(ei, !isPlayer);
     if (cone.indexOf(index) >= 0) power -= eu.char.intelligence * 0.03;
+  }
+  power *= factionBonus;
+  const isLord = u.char.lord_name === u.char.name;
+  if (isLord && !hasQunxiong) {
+    let count = 0;
+    for (let i=0;i<64;i++) {
+      const fu = myBoard[i];
+      if (fu && fu !== u && uFactions.includes(fu.char.faction)) count++;
+    }
+    power *= (1 + count * 0.05);
   }
   return Math.max(1, Math.round(power));
 }
@@ -334,7 +409,7 @@ function showDetailUnit(u, isPlayer, idx) {
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
       <div class="d-info">
         <div class="dname" style="color:${rc}">${char.name} ${isFlag?'🚩':''}</div>
-        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''} · 战力 ${power}</div>
+        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''}${getFactions(char).length ? ' · ' + renderFactionBadges(getFactions(char)) : ''}${char.lord_name === char.name ? ' · 👑 主公' : ''} · 战力 ${power}</div>${getFactions(char).length ? `<div class="d-faction">${renderFactionBadges(getFactions(char), ' ')}</div>` : ''}
         ${char.note ? `<div class="dnote">${escHtml(char.note)}</div>` : ''}
       </div>
     </div>
@@ -365,7 +440,7 @@ function showCharDetail(char, onBoard, onAi) {
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
       <div class="d-info">
         <div class="dname" style="color:${rc}">${isFlagGen ? '🚩 ' : ''}${char.name}</div>
-        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''} · ${status}</div>
+        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''}${getFactions(char).length ? ' · ' + renderFactionBadges(getFactions(char)) : ''} · ${status}</div>${getFactions(char).length ? `<div class="d-faction">${renderFactionBadges(getFactions(char), ' ')}</div>` : ''}
         ${char.note ? `<div class="dnote">${escHtml(char.note)}</div>` : ''}
       </div>
     </div>
@@ -514,7 +589,8 @@ function updateCollectionGrid() {
       : isOtherFlagWaiting ? '<div class="freeze-badge" style="background:rgba(80,80,80,0.7);color:#999">⏳ 旗本在场</div>'
       : isFlagGen ? '<div class="freeze-badge" style="background:rgba(100,50,0,0.7);color:#f5a623">🚩 旗本</div>'
       : '';
-    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}${showAttr}</div>`;
+    const factionTag = getFactions(c).map(f => `<span class="c-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
+    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div>${factionTag ? `<div class="cmeta">${factionTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}${showAttr}</div>`;
     div.addEventListener('click', ()=>{
       showCharDetail(c, onBoard, onAi || onCooldown || dead || isLocked || isOtherFlagWaiting);
       if (onBoard||onAi||onCooldown||dead||isLocked||isOtherFlagWaiting) return;
@@ -572,7 +648,8 @@ function updateAiCollectionGrid() {
       : isCurrentFlag ? '<div class="freeze-badge" style="background:rgba(0,100,0,0.7);color:#4caf50">🚩</div>'
       : isFlagGen ? '<div class="freeze-badge" style="background:rgba(100,50,0,0.7);color:#f5a623">🚩</div>'
       : '';
-    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
+    const factionTag = getFactions(c).map(f => `<span class="c-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
+    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div>${factionTag ? `<div class="cmeta">${factionTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
     div.addEventListener('click', ()=> showCharDetail(c, onBoard, false));
     el.appendChild(div);
   });
@@ -599,10 +676,17 @@ function updateSpectatorGrid() {
     const div = document.createElement('div');
     div.className = 'char-card';
     const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
-    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>`;
-    if (canRecruit) { html += '<div style="font-size:9px;color:#4caf50;text-align:center">招募</div>'; }
+    const fTag = getFactions(c).map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('/');
+    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div>${fTag ? `<div class="cmeta">${fTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>`;
+    if (canRecruit) { html += '<div style="font-size:9px;color:#4caf50;text-align:center;cursor:pointer">招募</div>'; }
     div.innerHTML = html;
-    if (canRecruit) div.addEventListener('click', () => recruitFromSpectator(c.id, true));
+    div.addEventListener('click', (e) => {
+      if (canRecruit && e.target && e.target.textContent === '招募') {
+        recruitFromSpectator(c.id, true);
+      } else {
+        showCharDetail(c, false, false);
+      }
+    });
     el.appendChild(div);
   });
 }
@@ -654,8 +738,25 @@ function showVictory(win) {
     const s=combatStats[bestUid];
     const avgMelee=s.meleeHits>0?Math.round(s.meleeDmg/s.meleeHits):0;
     const avgRanged=s.rangedHits>0?Math.round(s.rangedDmg/s.rangedHits):0;
+    // compute damage received by MVP
+    let mvpSlot = -1;
+    for (let i=0; i<player.board.length; i++) {
+      if ((player.board[i]&&player.board[i].uid==bestUid)||(ai.board[i]&&ai.board[i].uid==bestUid)) { mvpSlot=i; break; }
+    }
+    let rcvdMeleeDmg=0, rcvdMeleeHits=0, rcvdRangedDmg=0, rcvdRangedHits=0;
+    if (mvpSlot>=0) {
+      const mvpSlotKey = String(mvpSlot);
+      for (const uid in combatStats) {
+        if (uid==bestUid) continue;
+        const st = combatStats[uid];
+        if (st.melee_hit_details) for (const h of st.melee_hit_details) { if (h.target==mvpSlotKey) { rcvdMeleeDmg+=h.dmg; rcvdMeleeHits++; } }
+        if (st.ranged_hit_details) for (const h of st.ranged_hit_details) { if (h.target==mvpSlotKey) { rcvdRangedDmg+=h.dmg; rcvdRangedHits++; } }
+      }
+    }
+    const avgRcvdMelee=rcvdMeleeHits>0?Math.round(rcvdMeleeDmg/rcvdMeleeHits):0;
+    const avgRcvdRanged=rcvdRangedHits>0?Math.round(rcvdRangedDmg/rcvdRangedHits):0;
     mvpEl.style.display='block';
-    mvpEl.innerHTML=`<div class="v-mvp"><div class="v-mvp-title">🏅 MVP — ${bestChar.name}</div><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><img class="v-mvp-avatar" src="${generateAvatar(bestChar,56)}"><div><div class="v-mvp-name">${bestChar.name}</div><div class="v-mvp-meta">${bestChar.type||''} · ${bestChar.rating||''} · 统${bestChar.leadership} 武${bestChar.martial} 智${bestChar.intelligence} 政${bestChar.politics}</div></div></div><div class="v-mvp-row"><span class="lab">总伤害</span><span class="val">${s.damage.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战均伤</span><span class="val">${s.meleeHits}次 · 每次${avgMelee.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程均伤</span><span class="val">${s.rangedHits}次 · 每次${avgRanged.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">击溃/击毙</span><span class="val">${s.kills}人</span></div><div class="v-mvp-row"><span class="lab">大威风</span><span class="val">${s.retreatTriggers}次</span></div></div>`;
+    mvpEl.innerHTML=`<div class="v-mvp"><div class="v-mvp-title">🏅 MVP — ${bestChar.name}</div><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><img class="v-mvp-avatar" src="${generateAvatar(bestChar,56)}"><div><div class="v-mvp-name">${bestChar.name}</div><div class="v-mvp-meta">${renderFactionBadges(getFactions(bestChar))} · ${bestChar.type||''} · ${bestChar.rating||''} · 统${bestChar.leadership} 武${bestChar.martial} 智${bestChar.intelligence} 政${bestChar.politics}</div></div></div><div class="v-mvp-sub-title">⚔ 造成伤害</div><div class="v-mvp-row"><span class="lab">总伤害</span><span class="val">${s.damage.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战</span><span class="val">${s.meleeHits}次 · 均伤 ${avgMelee.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程</span><span class="val">${s.rangedHits}次 · 均伤 ${avgRanged.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">击溃/击毙</span><span class="val">${s.kills}人</span></div><div class="v-mvp-row"><span class="lab">大威风</span><span class="val">${s.retreatTriggers}次</span></div>${rcvdMeleeHits||rcvdRangedHits?`<div class="v-mvp-sub-title" style="margin-top:6px">🛡 受到伤害</div>${rcvdMeleeHits?`<div class="v-mvp-row"><span class="lab">近战</span><span class="val">${rcvdMeleeHits}次 · 均伤 ${avgRcvdMelee.toLocaleString()}</span></div>`:''}${rcvdRangedHits?`<div class="v-mvp-row"><span class="lab">远程</span><span class="val">${rcvdRangedHits}次 · 均伤 ${avgRcvdRanged.toLocaleString()}</span></div>`:''}`:''}</div>`;
   } else {
     mvpEl.style.display='none';
   }
@@ -665,7 +766,7 @@ function showVictory(win) {
     const ch = uidCharMap[uid];
     if (!ch) continue;
     const cid = ch.id;
-    if (!charAgg[cid]) charAgg[cid] = { char: ch, side: uidSideMap[uid] || 'player', damage: 0, meleeDmg: 0, rangedDmg: 0, meleeHits: 0, rangedHits: 0, kills: 0, retreatTriggers: 0 };
+    if (!charAgg[cid]) charAgg[cid] = { char: ch, side: uidSideMap[uid] || 'player', damage: 0, meleeDmg: 0, rangedDmg: 0, meleeHits: 0, rangedHits: 0, kills: 0, retreatTriggers: 0, meleeHitDetails: [], rangedHitDetails: [] };
     const s = combatStats[uid];
     charAgg[cid].damage += s.damage || 0;
     charAgg[cid].meleeDmg += s.meleeDmg || 0;
@@ -674,12 +775,16 @@ function showVictory(win) {
     charAgg[cid].rangedHits += s.rangedHits || 0;
     charAgg[cid].kills += s.kills || 0;
     charAgg[cid].retreatTriggers += s.retreatTriggers || 0;
+    if (s.melee_hit_details) charAgg[cid].meleeHitDetails.push(...s.melee_hit_details);
+    if (s.ranged_hit_details) charAgg[cid].rangedHitDetails.push(...s.ranged_hit_details);
   }
   const allStats = Object.values(charAgg);
   const sideLabel = s => s==='player'?'<span class="v-rank-side p">己</span>':'<span class="v-rank-side a">敌</span>';
-  const entryHTML = (item, rank, valLabel, valKey) => {
+  const entryHTML = (item, rank, valLabel, valKey, hitKey) => {
     const v = valKey ? item[valKey] : item;
-    return `<div class="v-rank-entry"><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span>${sideLabel(item.side)}<span class="v-rank-val">${typeof v==='number'?v.toLocaleString():v}${valLabel}</span></div>`;
+    const hits = hitKey && item[hitKey] ? item[hitKey].map(h => h.dmg) : [];
+    const avg = hits.length ? (hits.reduce((a,b)=>a+b, 0) / hits.length).toFixed(1) : '';
+    return `<div class="v-rank-entry"><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span>${sideLabel(item.side)}<span class="v-rank-val">${typeof v==='number'?v.toLocaleString():v}${valLabel}</span>${avg ? `<div class="v-rank-hits">均伤 ${avg}</div>` : ''}</div>`;
   };
   const topN = (arr, key, n=3) => arr.filter(i=>i[key]>0).sort((a,b)=>b[key]-a[key]).slice(0,n);
   const killsTop = topN(allStats, 'kills');
@@ -732,11 +837,11 @@ function showVictory(win) {
   else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
   bottomHtml+='</div>';
   bottomHtml+='<div class="v-rank-section"><div class="v-rank-title">🗡 近战伤害 TOP3</div>';
-  if (meleeTop.length) meleeTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'','meleeDmg'));
+  if (meleeTop.length) meleeTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'','meleeDmg','meleeHitDetails'));
   else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
   bottomHtml+='</div>';
   bottomHtml+='<div class="v-rank-section"><div class="v-rank-title">🏹 远程伤害 TOP3</div>';
-  if (rangedTop.length) rangedTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'','rangedDmg'));
+  if (rangedTop.length) rangedTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'','rangedDmg','rangedHitDetails'));
   else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
   bottomHtml+='</div>';
   bottomHtml+='</div>';
@@ -752,8 +857,17 @@ function totalTroops(side) {
 }
 
 function updateIncomeDisplay() {
-  document.getElementById('pIncome').textContent = '+0/回合';
-  document.getElementById('aIncome').textContent = '+0/回合';
+  const calc = (side) => {
+    const boardT = side.board.reduce((s, u) => s + (u ? u.troops : 0), 0);
+    let inc = Math.floor(TROOP_INCOME * Math.max(0, 1 - boardT / MAX_TOTAL_TROOPS));
+    const sumPol = side.board.reduce((s, u) => s + (u ? (u.char.politics || 0) : 0), 0);
+    const mult = Math.max(0.2, Math.min(2.0, sumPol * 0.001));
+    inc = Math.floor(inc * mult);
+    const maxAdd = MAX_TOTAL_TROOPS - boardT - (side.troops || 0);
+    return Math.max(0, Math.min(inc, maxAdd));
+  };
+  document.getElementById('pIncome').textContent = `+${calc(player)}/回合`;
+  document.getElementById('aIncome').textContent = `+${calc(ai)}/回合`;
 }
 
 function updateUI() {
@@ -836,9 +950,11 @@ function showPickModal(options) {
     const ratingColor = RATING_COLORS[c.rating] || '#aaa';
     const typeColor = TYPE_COLORS[c.type] || '#aaa';
     const total = c.leadership + c.martial + c.intelligence + c.politics;
+    const factionClr = FACTION_COLORS[c.faction] || '#888';
+    const factionPickTags = getFactions(c).map(f => `<span style="font-size:9px;color:${FACTION_COLORS[f]||'#888'};background:rgba(0,0,0,.4);padding:0 4px;border-radius:3px">${f}</span>`).join(' ');
     div.innerHTML = `
       <img class="pc-avatar" src="${generateAvatar(c, 70)}" alt="${c.name}">
-      <div class="pc-name">${c.name}</div>
+      <div class="pc-name">${c.name} ${factionPickTags}</div>
       <div class="pc-type" style="color:${typeColor}">${c.type}</div>
       <div class="pc-rating" style="color:${ratingColor}">${c.rating}</div>
       ${c.identity ? `<div class="pc-identity" style="font-size:9px;color:#f5a623;margin-top:1px">${c.identity}</div>` : ''}
@@ -1037,6 +1153,7 @@ function editorPlaceholder(name) {
 // ==================== CHARACTER EDITOR ====================
 let editorChars = [];
 let editorOriginals = [];
+let editorFactionMap = {};
 
 async function openCharEditor() {
   openEditor(); // switch to editor submenu
@@ -1046,8 +1163,13 @@ async function openCharEditor() {
   const grid = document.getElementById('editorGrid');
   grid.innerHTML = '<div style="color:#888;padding:40px;text-align:center">加载武将数据中...</div>';
   try {
-    const res = await fetch('characters.json');
-    const data = await res.json();
+    const [charRes, factionRes] = await Promise.all([
+      fetch('characters.json'),
+      fetch('/api/factions/map'),
+    ]);
+    const data = await charRes.json();
+    const factionData = await factionRes.json();
+    editorFactionMap = factionData.factions || {};
     editorOriginals = data.map(c => JSON.parse(JSON.stringify(c)));
     editorChars = data.map(c => JSON.parse(JSON.stringify(c)));
     recalcRatings(editorOriginals);
@@ -1073,11 +1195,18 @@ function closeCharEditor() {
 
 function renderEditorGrid() {
   const grid = document.getElementById('editorGrid');
+  const factionOptions = Object.keys(FACTION_COLORS).sort().map(f => `<option value="${f}">${f}</option>`).join('');
   grid.innerHTML = editorChars.map((c, i) => {
     const orig = editorOriginals[i];
+    const mapEntry = editorFactionMap[c.name];
+    const defaultFaction = typeof mapEntry === 'string' ? mapEntry : (mapEntry?.primary || '群雄');
+    const defaultFactions = typeof mapEntry === 'string' ? [mapEntry] : (mapEntry?.all || [defaultFaction]);
+    const curFactions = c.factions || (c.faction ? [c.faction] : defaultFactions);
+    const curFaction = curFactions[0];
+    const hasChangedFaction = c.faction && c.faction !== (typeof editorFactionMap[c.name] === 'string' ? editorFactionMap[c.name] : (editorFactionMap[c.name]?.primary || '群雄'));
     const changed = c.leadership !== orig.leadership || c.martial !== orig.martial ||
       c.intelligence !== orig.intelligence || c.politics !== orig.politics ||
-      c.type !== orig.type;
+      c.type !== orig.type || hasChangedFaction;
     return `<div class="ec-card${changed ? ' ec-changed' : ''}">
       <div class="ec-id">#${c.id}</div>
       <div class="ec-avatar-row"><img class="ec-avatar" src="${generateAvatar(c, 64)}"></div>
@@ -1086,6 +1215,10 @@ function renderEditorGrid() {
         <select class="ec-input ec-type" data-idx="${i}">${['全能','文臣','武将','特才'].map(t => `<option${t===c.type?' selected':''}>${t}</option>`).join('')}</select>
       </div>
       <div class="ec-field"><span class="ec-label">评</span><span class="ec-rating-static" style="color:${RATING_COLORS[c.rating]||'#ccc'}">${c.rating}</span></div>
+      <div class="ec-field"><span class="ec-label">势</span>
+        <select class="ec-input ec-faction" data-idx="${i}" style="color:${FACTION_COLORS[curFaction]||'#888'}">${factionOptions.replace(`value="${curFaction}"`, `value="${curFaction}" selected`)}</select>
+        <span style="font-size:8px;color:#888;margin-left:2px">${curFactions.map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('/')}</span>
+      </div>
       <div class="ec-field"><span class="ec-label">统</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="leadership" type="number" min="0" max="100" value="${c.leadership}"></div>
       <div class="ec-field"><span class="ec-label">武</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="martial" type="number" min="0" max="100" value="${c.martial}"></div>
       <div class="ec-field"><span class="ec-label">智</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="intelligence" type="number" min="0" max="100" value="${c.intelligence}"></div>
@@ -1100,6 +1233,9 @@ function renderEditorGrid() {
   });
   grid.querySelectorAll('.ec-type').forEach(el => {
     el.addEventListener('change', onSelectChange);
+  });
+  grid.querySelectorAll('.ec-faction').forEach(el => {
+    el.addEventListener('change', onFactionChange);
   });
 }
 
@@ -1123,8 +1259,19 @@ function onSelectChange(e) {
   renderEditorGrid();
 }
 
+function onFactionChange(e) {
+  const el = e.target;
+  const idx = parseInt(el.dataset.idx);
+  editorChars[idx].faction = el.value;
+  delete editorChars[idx].factions; // clear multi-faction override so display uses primary
+  renderEditorGrid();
+}
+
 function restoreChar(idx) {
   editorChars[idx] = JSON.parse(JSON.stringify(editorOriginals[idx]));
+  // Remove any faction override so it reverts to the map default
+  delete editorChars[idx].faction;
+  delete editorChars[idx].factions;
   renderEditorGrid();
 }
 
@@ -1237,6 +1384,16 @@ function openCustomEditor(editId) {
   const ov = document.getElementById('customEditorOverlay');
   ov.classList.add('show');
   cgEditingId = editId || null;
+  // Populate faction dropdown
+  const sel = document.getElementById('cgFaction');
+  if (!sel.options.length) {
+    const factions = Object.keys(FACTION_COLORS).sort();
+    factions.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f; opt.textContent = f;
+      sel.appendChild(opt);
+    });
+  }
   renderAvatarGrid();
   // Populate fields if editing
   if (editId) {
@@ -1244,12 +1401,25 @@ function openCustomEditor(editId) {
   } else {
     resetCustomForm();
   }
-  // Listen for stat changes to update total & type constraint
+  // Listen for stat changes to validate, update total & type constraint
   document.querySelectorAll('#customEditorOverlay .cg-stat').forEach(el => {
-    el.addEventListener('input', () => { updateCgTotal(); enforceCgTypeConstraint(); });
+    const clamp = () => {
+      if (el.value === '') return;
+      const num = Number(el.value);
+      if (num > 100) {
+        showToast('属性值不可超过100', 'error');
+        el.value = 100;
+      } else if (num < 1) {
+        showToast('属性值不可低于1', 'error');
+        el.value = 1;
+      }
+      updateCgTotal(); enforceCgTypeConstraint();
+    };
+    el.addEventListener('input', clamp);
+    el.addEventListener('blur', clamp);
   });
   document.getElementById('cgName').addEventListener('input', updateCgPreview);
-  document.querySelectorAll('#customEditorOverlay .cg-stat, #cgType').forEach(el => {
+  document.querySelectorAll('#customEditorOverlay .cg-stat, #cgType, #cgFaction').forEach(el => {
     el.addEventListener('change', updateCgPreview);
   });
 }
@@ -1267,14 +1437,15 @@ function resetCustomForm() {
   cgSelectedAvatar = 501;
   document.getElementById('cgName').value = '';
   document.getElementById('cgType').value = '全能';
-  document.getElementById('cgLead').value = 50;
-  document.getElementById('cgMar').value = 50;
-  document.getElementById('cgInt').value = 50;
-  document.getElementById('cgPol').value = 50;
+  document.getElementById('cgFaction').value = '群雄';
+  ['cgLead','cgMar','cgInt','cgPol'].forEach(id => {
+    document.getElementById(id).value = 50;
+  });
   updateCgTotal();
   enforceCgTypeConstraint();
   renderAvatarGrid();
   updateCgPreview();
+  updateSelectedAvatar();
 }
 
 function renderAvatarGrid() {
@@ -1284,21 +1455,14 @@ function renderAvatarGrid() {
     const img = document.createElement('img');
     img.className = 'cg-avatar-opt' + (id === cgSelectedAvatar ? ' selected' : '');
     img.src = `portraits/${id}.webp`;
-    img.onclick = () => { cgSelectedAvatar = id; renderAvatarGrid(); updateCgPreview(); };
-    img.onmouseenter = () => showAvatarDropdown(id);
-    img.onmouseleave = () => hideAvatarDropdown();
+    img.onclick = () => { cgSelectedAvatar = id; renderAvatarGrid(); updateCgPreview(); updateSelectedAvatar(); };
     grid.appendChild(img);
   }
 }
 
-function showAvatarDropdown(id) {
-  const el = document.getElementById('cgAvatarDropdown');
-  document.getElementById('cgAvatarDropdownImg').src = `portraits/${id}.webp`;
-  el.classList.add('show');
-}
-
-function hideAvatarDropdown() {
-  document.getElementById('cgAvatarDropdown').classList.remove('show');
+function updateSelectedAvatar() {
+  const img = document.querySelector('#cgSelectedAvatar img');
+  img.src = `portraits/${cgSelectedAvatar}.webp`;
 }
 
 function updateCgTotal() {
@@ -1328,16 +1492,19 @@ function enforceCgTypeConstraint() {
 function updateCgPreview() {
   const name = document.getElementById('cgName').value || '未命名';
   const type = document.getElementById('cgType').value;
+  const faction = document.getElementById('cgFaction').value;
   const ld = parseInt(document.getElementById('cgLead').value) || 0;
   const mr = parseInt(document.getElementById('cgMar').value) || 0;
   const it = parseInt(document.getElementById('cgInt').value) || 0;
   const po = parseInt(document.getElementById('cgPol').value) || 0;
   const total = ld + mr + it + po;
-  const char = { id: cgEditingId || 9999, name, type, leadership: ld, martial: mr, intelligence: it, politics: po, rating: 'C' };
+  const char = { id: cgEditingId || 9999, avatarId: cgSelectedAvatar, name, type, faction, leadership: ld, martial: mr, intelligence: it, politics: po, rating: 'C' };
+  const fColor = FACTION_COLORS[faction] || '#888';
   const pv = document.getElementById('cgPreview');
   pv.innerHTML = `<img class="cg-prev-avatar" src="${generateAvatar(char, 48)}">
     <div class="cg-prev-info">
       <div style="font-weight:600;color:#f5a623">${escHtml(name)}</div>
+      <div style="color:${fColor};font-size:10px">${faction}</div>
       <div>${type} · 统${ld} 武${mr} 智${it} 政${po} · 总分${total}</div>
     </div>`;
 }
@@ -1350,6 +1517,7 @@ async function loadCustomGeneralForEdit(id) {
     if (!g) { showToast('未找到该武将', 'error'); return; }
     document.getElementById('cgName').value = g.name || '';
     document.getElementById('cgType').value = g.type || '全能';
+    document.getElementById('cgFaction').value = g.faction || '群雄';
     document.getElementById('cgLead').value = g.leadership || 50;
     document.getElementById('cgMar').value = g.martial || 50;
     document.getElementById('cgInt').value = g.intelligence || 50;
@@ -1375,6 +1543,8 @@ async function saveCustomGeneral() {
   const isMartial = (ld + mr) >= (it + po);
   if (type === '武将' && !isMartial) { showToast('统武<智政时不可选择武将类型', 'error'); return; }
   if (type === '文臣' && isMartial) { showToast('统武>=智政时不可选择文臣类型', 'error'); return; }
+  if (ld > 100 || mr > 100 || it > 100 || po > 100) { showToast('属性值不可超过100', 'error'); return; }
+  if (ld < 1 || mr < 1 || it < 1 || po < 1) { showToast('属性值不可低于1', 'error'); return; }
   const ld2 = Math.min(100, Math.max(1, ld));
   const mr2 = Math.min(100, Math.max(1, mr));
   const it2 = Math.min(100, Math.max(1, it));
@@ -1409,6 +1579,7 @@ async function saveCustomGeneral() {
     name, type,
     leadership: ld2, martial: mr2, intelligence: it2, politics: po2,
     total_score: total, rating,
+    faction: document.getElementById('cgFaction').value,
     avatarId: cgSelectedAvatar,
   };
   generals.push(entry);

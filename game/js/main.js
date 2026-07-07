@@ -44,6 +44,7 @@ let playerCooldowns = [], aiCooldowns = [];
 let autoPlay = false;
 let scatterDebuff = {}, deadList = [], flagScatterCount = { player: 0, ai: 0 };
 let spectatorPool = [];
+let pendingFlagPicks = 0;
 let combatStats = {}, uidCharMap = {}, uidSideMap = {};
 let terrainMode = 'normal';
 
@@ -56,6 +57,9 @@ function normalizeSide(obj) {
     troops: obj.troops || 0,
     flagIdx: obj.flag_idx ?? obj.flagIdx ?? -1,
     placed: obj.placed ?? 0,
+    flagGenerals: obj.flag_generals || [],
+    lockedFlagIds: obj.locked_flag_ids || [],
+    currentFlagCharId: obj.current_flag_char_id ?? null,
   };
 }
 
@@ -74,6 +78,7 @@ function applyStateFromServer(data) {
   if (s.dead_list ?? s.deadList) deadList = s.dead_list ?? s.deadList;
   flagScatterCount = s.flag_scatter_count ?? s.flagScatterCount ?? flagScatterCount;
   if (s.spectator_pool ?? s.spectatorPool) spectatorPool = s.spectator_pool ?? s.spectatorPool;
+  if (s.pending_flag_picks !== undefined) pendingFlagPicks = s.pending_flag_picks;
   if (s.combat_stats ?? s.combatStats) combatStats = s.combat_stats ?? s.combatStats;
   if (s.uid_char_map ?? s.uidCharMap) uidCharMap = s.uid_char_map ?? s.uidCharMap;
   if (s.uid_side_map ?? s.uidSideMap) uidSideMap = s.uid_side_map ?? s.uidSideMap;
@@ -123,6 +128,12 @@ function updateTerrainUI() {
 function generateAvatar(char, size) {
   const key = char.id + '-' + size;
   if (avatarCache[key]) return avatarCache[key];
+  // Use webp portrait when available
+  if (char.id >= 1 && char.id <= 100) {
+    avatarCache[key] = 'portraits/' + char.id + '.webp';
+    return avatarCache[key];
+  }
+  // Fallback: canvas-generated avatar
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const ctx = c.getContext('2d');
@@ -323,12 +334,18 @@ function showCharDetail(char, onBoard, onAi) {
   const rc = RATING_COLORS[char.rating] || '#888';
   const dead = isDead(char.id);
   const onCooldown = isOnCooldown(char.id, true) || isOnCooldown(char.id, false);
-  const status = onBoard ? '已上场' : dead ? '已战死' : onAi ? '敌方已上场' : onCooldown ? '冷却中' : '未上场';
+  const isFlagGen = player.flagGenerals.some(fg => fg.id === char.id);
+  const isLocked = player.lockedFlagIds.includes(char.id);
+  const isCurrentFlag = player.currentFlagCharId === char.id;
+  let status = onBoard ? '已上场' : dead ? '已战死' : onAi ? '敌方已上场' : onCooldown ? '冷却中' : '未上场';
+  if (isLocked) status = '🔒 旗本已锁定';
+  else if (isFlagGen && isCurrentFlag) status = '🚩 旗本（当前旗手）';
+  else if (isFlagGen && !onBoard) status = '🚩 旗本候选';
   panel.innerHTML = `
     <div class="d-top">
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
       <div class="d-info">
-        <div class="dname" style="color:${rc}">${char.name}</div>
+        <div class="dname" style="color:${rc}">${isFlagGen ? '🚩 ' : ''}${char.name}</div>
         <div class="dmeta">${char.type||''} · ${char.rating||''} · ${status}</div>
       </div>
     </div>
@@ -342,6 +359,16 @@ function showCharDetail(char, onBoard, onAi) {
 
 function statBar(label, val, color) {
   return `<div class="stat-row"><span class="slabel">${label}</span><div class="sbar"><div class="sfill" style="width:${val}%;background:${color}"></div></div><span class="sval">${val}</span></div>`;
+}
+
+function miniAttrBars(c) {
+  const attrs = [
+    {l:'统',v:c.leadership,c:'#e94560'},
+    {l:'武',v:c.martial,c:'#f5a623'},
+    {l:'智',v:c.intelligence,c:'#2ecc71'},
+    {l:'政',v:c.politics,c:'#3498db'},
+  ];
+  return attrs.map(a => `<div class="attr-row"><span class="alabel">${a.l}</span><span class="abar" style="width:${a.v}%;background:${a.c}"></span></div>`).join('');
 }
 
 // ==================== TROOP MODAL ====================
@@ -375,6 +402,13 @@ async function confirmPlace() {
   if (isBehindEnemyLine(pendingCell, true)) {
     addBattleLog('不可放置在敌方棋子后方！','lose'); cancelPlace(); return;
   }
+  const isFlagGen = player.flagGenerals.some(fg => fg.id === pendingChar.id);
+  if (isFlagGen && player.lockedFlagIds.includes(pendingChar.id)) {
+    addBattleLog('该旗本已被锁定，无法上场！','lose'); cancelPlace(); return;
+  }
+  if (isFlagGen && player.currentFlagCharId !== null && player.currentFlagCharId !== pendingChar.id) {
+    addBattleLog('已有旗本在场上，只能同时放置一名旗本！','lose'); cancelPlace(); return;
+  }
   try {
     const data = await api.place(gameId, pendingChar.id, pendingCell, troops);
     cancelPlace();
@@ -407,14 +441,26 @@ function updateCollectionGrid() {
   if (playerCatFilter !== 'all') filtered = filtered.filter(c => c.type === playerCatFilter);
   const sortAttr = playerSortBy;
   const ratingOrder={ 'S+':0,'S':1,'A':2,'B':3,'C':4,'D':5 };
+  const hasActiveFlagOnBoard = player.currentFlagCharId !== null && player.board.some(u => u && u.char.id === player.currentFlagCharId);
+
+  const isFlagGen = c => player.flagGenerals.some(fg => fg.id === c.id);
+
   filtered.sort((a,b) => {
     const aDead=isDead(a.id), bDead=isDead(b.id);
     const aCd=isOnCooldown(a.id,true), bCd=isOnCooldown(b.id,true);
     const aOn=player.board.some(u=>u&&u.char.id===a.id)||ai.board.some(u=>u&&u.char.id===a.id);
     const bOn=player.board.some(u=>u&&u.char.id===b.id)||ai.board.some(u=>u&&u.char.id===b.id);
-    const aG=aDead?3:(aCd?2:(aOn?1:0));
-    const bG=bDead?3:(bCd?2:(bOn?1:0));
+    const aLocked=player.lockedFlagIds.includes(a.id);
+    const bLocked=player.lockedFlagIds.includes(b.id);
+    const aFg=isFlagGen(a);
+    const bFg=isFlagGen(b);
+    const aWait=aFg && !aLocked && !(aOn && player.currentFlagCharId===a.id) && hasActiveFlagOnBoard;
+    const bWait=bFg && !bLocked && !(bOn && player.currentFlagCharId===b.id) && hasActiveFlagOnBoard;
+    const aG=aLocked?5:(aDead?4:(aWait?3:(aCd?2:(aOn?1:0))));
+    const bG=bLocked?5:(bDead?4:(bWait?3:(bCd?2:(bOn?1:0))));
     if (aG!==bG) return aG-bG;
+    // Flag generals before regulars in same group
+    if (aFg !== bFg) return aFg ? -1 : 1;
     if (sortAttr !== 'default') {
       return (b[sortAttr]||0) - (a[sortAttr]||0);
     }
@@ -429,16 +475,29 @@ function updateCollectionGrid() {
     const cdRemaining = onCooldown ? (playerCooldowns.find(x => x.id === c.id)) : null;
     const freezeRemaining = cdRemaining ? Math.max(0, (cdRemaining.round + 4) - round + 1) : 0;
     const dead = isDead(c.id);
+    const isFlagGen = player.flagGenerals.some(fg => fg.id === c.id);
+    const isLocked = player.lockedFlagIds.includes(c.id);
+    const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
+    const isCurrentFlag = player.currentFlagCharId === c.id && onBoard;
+    const isOtherFlagWaiting = isFlagGen && !isLocked && !isCurrentFlag && hasActiveFlagOnBoard;
     div.className = 'char-card';
-    if (dead) div.classList.add('dead');
+    if (isLocked) div.classList.add('locked-flag');
+    else if (dead) div.classList.add('dead');
     else if (onBoard||onAi) div.classList.add('used');
+    else if (isOtherFlagWaiting) div.classList.add('cooldown');
     else if (onCooldown) div.classList.add('cooldown');
+    if (isFlagGen && !isLocked && !isOtherFlagWaiting) div.classList.add('flag-gen');
     if (selectedChar&&selectedChar.id===c.id) div.classList.add('selected');
     const showAttr = playerSortBy !== 'default' ? `<div class="cattr">${c[playerSortBy]}</div>` : '';
-    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,22)}"><div class="cname">${c.name}</div><div class="cmeta">${c.type||''}</div><div class="crating">${c.rating||''}</div>${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}${showAttr}</div>`;
+    const flagBadge = isLocked ? '<div class="freeze-badge" style="background:rgba(100,0,0,0.7);color:#ef5350">🔒 已锁定</div>'
+      : isCurrentFlag ? '<div class="freeze-badge" style="background:rgba(0,100,0,0.7);color:#4caf50">🚩 旗手中</div>'
+      : isOtherFlagWaiting ? '<div class="freeze-badge" style="background:rgba(80,80,80,0.7);color:#999">⏳ 旗本在场</div>'
+      : isFlagGen ? '<div class="freeze-badge" style="background:rgba(100,50,0,0.7);color:#f5a623">🚩 旗本</div>'
+      : '';
+    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}${showAttr}</div>`;
     div.addEventListener('click', ()=>{
-      showCharDetail(c, onBoard, onAi || onCooldown || dead);
-      if (onBoard||onAi||onCooldown||dead) return;
+      showCharDetail(c, onBoard, onAi || onCooldown || dead || isLocked || isOtherFlagWaiting);
+      if (onBoard||onAi||onCooldown||dead||isLocked||isOtherFlagWaiting) return;
       selectedChar=c; updateCollectionGrid();
       if (gamePhase==='place_player') setPhase(`已选 ${c.name} · 点击下方空位放置`);
     });
@@ -455,12 +514,18 @@ function updateAiCollectionGrid() {
   if (aiCatFilter !== 'all') filtered = filtered.filter(c => c.type === aiCatFilter);
   const totalScore = ch => ch.leadership+ch.martial+ch.intelligence+ch.politics;
   const ratingOrder={ 'S+':0,'S':1,'A':2,'B':3,'C':4,'D':5 };
+  const isAiFlagGen = c => ai.flagGenerals.some(fg => fg.id === c.id);
+
   filtered.sort((a,b) => {
     const aDead=isDead(a.id), bDead=isDead(b.id);
     const aCd=isOnCooldown(a.id,false), bCd=isOnCooldown(b.id,false);
-    const aGrp=aDead?2:(aCd?1:0);
-    const bGrp=bDead?2:(bCd?1:0);
+    const aOn=ai.board.some(u=>u&&u.char.id===a.id)||player.board.some(u=>u&&u.char.id===a.id);
+    const bOn=ai.board.some(u=>u&&u.char.id===b.id)||player.board.some(u=>u&&u.char.id===b.id);
+    const aFg=isAiFlagGen(a), bFg=isAiFlagGen(b);
+    const aGrp=aDead?3:(aCd?2:(aOn?1:0));
+    const bGrp=bDead?3:(bCd?2:(bOn?1:0));
     if (aGrp!==bGrp) return aGrp-bGrp;
+    if (aFg !== bFg) return aFg ? -1 : 1;
     const ra=ratingOrder[a.rating]??9, rb=ratingOrder[b.rating]??9;
     if (ra!==rb) return ra-rb;
     return totalScore(b)-totalScore(a);
@@ -472,12 +537,22 @@ function updateAiCollectionGrid() {
     const cdRemaining = onCooldown ? (aiCooldowns.find(x => x.id === c.id)) : null;
     const freezeRemaining = cdRemaining ? Math.max(0, (cdRemaining.round + 4) - round + 1) : 0;
     const dead = isDead(c.id);
+    const isFlagGen = isAiFlagGen(c);
+    const isLocked = ai.lockedFlagIds.includes(c.id);
+    const isCurrentFlag = ai.currentFlagCharId === c.id && onBoard;
+    const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
     const div = document.createElement('div');
     div.className = 'char-card';
-    if (dead) div.classList.add('dead');
+    if (isLocked) div.classList.add('locked-flag');
+    else if (dead) div.classList.add('dead');
     else if (onBoard) div.classList.add('used');
     else if (onCooldown) div.classList.add('cooldown');
-    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,22)}"><div class="cname">${c.name}</div><div class="cmeta">${c.type||''}</div><div class="crating">${c.rating||''}</div>${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
+    if (isFlagGen && !isLocked) div.classList.add('flag-gen');
+    const flagBadge = isLocked ? '<div class="freeze-badge" style="background:rgba(100,0,0,0.7);color:#ef5350">🔒</div>'
+      : isCurrentFlag ? '<div class="freeze-badge" style="background:rgba(0,100,0,0.7);color:#4caf50">🚩</div>'
+      : isFlagGen ? '<div class="freeze-badge" style="background:rgba(100,50,0,0.7);color:#f5a623">🚩</div>'
+      : '';
+    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
     div.addEventListener('click', ()=> showCharDetail(c, onBoard, false));
     el.appendChild(div);
   });
@@ -503,7 +578,8 @@ function updateSpectatorGrid() {
   sorted.forEach(c => {
     const div = document.createElement('div');
     div.className = 'char-card';
-    let html = `<img class="cc-avatar" src="${generateAvatar(c,22)}"><div class="cname">${c.name}</div><div class="cmeta">${c.type||''}</div><div class="crating">${c.rating||''}</div>`;
+    const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
+    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div><div class="cmeta">${c.type||''} · ${c.rating||''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>`;
     if (canRecruit) { html += '<div style="font-size:9px;color:#4caf50;text-align:center">招募</div>'; }
     div.innerHTML = html;
     if (canRecruit) div.addEventListener('click', () => recruitFromSpectator(c.id, true));
@@ -559,7 +635,7 @@ function showVictory(win) {
     const avgMelee=s.meleeHits>0?Math.round(s.meleeDmg/s.meleeHits):0;
     const avgRanged=s.rangedHits>0?Math.round(s.rangedDmg/s.rangedHits):0;
     mvpEl.style.display='block';
-    mvpEl.innerHTML=`<div class="v-mvp"><div class="v-mvp-title">🏅 MVP — ${bestChar.name}</div><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><img class="v-mvp-avatar" src="${generateAvatar(bestChar,40)}"><div><div class="v-mvp-name">${bestChar.name}</div><div class="v-mvp-meta">${bestChar.type||''} · ${bestChar.rating||''} · 统${bestChar.leadership} 武${bestChar.martial} 智${bestChar.intelligence} 政${bestChar.politics}</div></div></div><div class="v-mvp-row"><span class="lab">总伤害</span><span class="val">${s.damage.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战均伤</span><span class="val">${s.meleeHits}次 · 每次${avgMelee.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程均伤</span><span class="val">${s.rangedHits}次 · 每次${avgRanged.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">击溃/击毙</span><span class="val">${s.kills}人</span></div><div class="v-mvp-row"><span class="lab">大威风</span><span class="val">${s.retreatTriggers}次</span></div></div>`;
+    mvpEl.innerHTML=`<div class="v-mvp"><div class="v-mvp-title">🏅 MVP — ${bestChar.name}</div><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><img class="v-mvp-avatar" src="${generateAvatar(bestChar,56)}"><div><div class="v-mvp-name">${bestChar.name}</div><div class="v-mvp-meta">${bestChar.type||''} · ${bestChar.rating||''} · 统${bestChar.leadership} 武${bestChar.martial} 智${bestChar.intelligence} 政${bestChar.politics}</div></div></div><div class="v-mvp-row"><span class="lab">总伤害</span><span class="val">${s.damage.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战均伤</span><span class="val">${s.meleeHits}次 · 每次${avgMelee.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程均伤</span><span class="val">${s.rangedHits}次 · 每次${avgRanged.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">击溃/击毙</span><span class="val">${s.kills}人</span></div><div class="v-mvp-row"><span class="lab">大威风</span><span class="val">${s.retreatTriggers}次</span></div></div>`;
   } else {
     mvpEl.style.display='none';
   }
@@ -573,7 +649,7 @@ function showVictory(win) {
   const sideLabel = s => s==='player'?'<span class="v-rank-side p">己</span>':'<span class="v-rank-side a">敌</span>';
   const entryHTML = (item, rank, valLabel, valKey) => {
     const v = valKey ? item[valKey] : item;
-    return `<div class="v-rank-entry"><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,24)}"><span class="v-rank-name">${item.char.name}</span>${sideLabel(item.side)}<span class="v-rank-val">${typeof v==='number'?v.toLocaleString():v}${valLabel}</span></div>`;
+    return `<div class="v-rank-entry"><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span>${sideLabel(item.side)}<span class="v-rank-val">${typeof v==='number'?v.toLocaleString():v}${valLabel}</span></div>`;
   };
   const topN = (arr, key, n=3) => arr.filter(i=>i[key]>0).sort((a,b)=>b[key]-a[key]).slice(0,n);
   const killsTop = topN(allStats, 'kills');
@@ -592,7 +668,7 @@ function showVictory(win) {
         .slice(0,3);
       topHtml+='<div class="v-rank-section"><div class="v-rank-title">🗡 MVP造成伤害 TOP3</div>';
       if (dealt.length) dealt.forEach((item,i)=>{
-        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,24)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
+        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
       });
       else topHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
       topHtml+='</div>';
@@ -605,7 +681,7 @@ function showVictory(win) {
         .slice(0,3);
       topHtml+='<div class="v-rank-section"><div class="v-rank-title">🛡 对MVP造成伤害 TOP3</div>';
       if (received.length) received.forEach((item,i)=>{
-        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,24)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
+        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`;
       });
       else topHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
       topHtml+='</div>';
@@ -696,6 +772,9 @@ async function drawPhase() {
     applyStateFromServer(data.state);
     if (data.options && data.options.length) {
       showPickModal(data.options);
+      if (pendingFlagPicks > 0) {
+        setPhase(`🎴 选择旗本武将（${pendingFlagPicks}名剩余）`);
+      }
     }
   } catch (e) {
     addBattleLog('抽卡失败：' + e.message, 'lose');
@@ -704,17 +783,28 @@ async function drawPhase() {
 
 function showPickModal(options) {
   const grid = document.getElementById('pickGrid');
+  const isFlagPick = pendingFlagPicks > 0;
+  const title = document.querySelector('#pickModal h2');
+  if (title) title.textContent = isFlagPick ? `选择旗本武将（剩余${pendingFlagPicks}名）` : '选择武将牌';
   grid.innerHTML = '';
   options.forEach(c => {
     const div = document.createElement('div');
     div.className = 'pick-card';
     const ratingColor = RATING_COLORS[c.rating] || '#aaa';
     const typeColor = TYPE_COLORS[c.type] || '#aaa';
+    const total = c.leadership + c.martial + c.intelligence + c.politics;
     div.innerHTML = `
+      <img class="pc-avatar" src="${generateAvatar(c, 70)}" alt="${c.name}">
       <div class="pc-name">${c.name}</div>
       <div class="pc-type" style="color:${typeColor}">${c.type}</div>
       <div class="pc-rating" style="color:${ratingColor}">${c.rating}</div>
       <div class="pc-stats">统${c.leadership} 武${c.martial} 智${c.intelligence} 政${c.politics}</div>
+      <div class="pc-attr-bar"><span class="pc-attr-l">统</span><span class="pc-attr-f" style="width:${c.leadership}%"></span></div>
+      <div class="pc-attr-bar"><span class="pc-attr-l">武</span><span class="pc-attr-f" style="width:${c.martial}%;background:#f5a623"></span></div>
+      <div class="pc-attr-bar"><span class="pc-attr-l">智</span><span class="pc-attr-f" style="width:${c.intelligence}%;background:#2ecc71"></span></div>
+      <div class="pc-attr-bar"><span class="pc-attr-l">政</span><span class="pc-attr-f" style="width:${c.politics}%;background:#3498db"></span></div>
+      <div class="pc-total">总分 ${total}</div>
+      ${isFlagPick ? '<div style="font-size:10px;color:#f5a623;margin-top:4px">🚩 旗本候选</div>' : ''}
     `;
     div.addEventListener('click', () => pickCard(c.id));
     grid.appendChild(div);
@@ -805,6 +895,33 @@ async function resetGame() {
   }
 }
 
+async function restartGame() {
+  if (!confirm('确定要重新开始吗？当前对局数据将被清空。')) return;
+  clearGameState();
+  try {
+    const data = await api.newGame();
+    gameId = data.game_id;
+    applyStateFromServer(data);
+  } catch (e) {
+    addBattleLog('重新开始失败：' + e.message, 'lose');
+  }
+}
+
+function clearGameState() {
+  document.getElementById('battleLog').innerHTML = '';
+  if (autoPlay) toggleAutoPlay();
+}
+
+function backToMenu() {
+  if (round > 0 || (gamePhase !== 'idle' && gamePhase !== 'gameover')) {
+    if (!confirm('确定要返回主菜单吗？本局对战数据将丢失。')) return;
+  }
+  if (autoPlay) toggleAutoPlay();
+  document.getElementById('mainMenu').style.display = 'flex';
+  document.getElementById('gameHeader').style.display = 'none';
+  document.getElementById('gameContent').style.display = 'none';
+}
+
 async function setTerrain(mode) {
   const names = { normal:'普通对战', tennozan:'天王山之战', nagashino:'长篠之战' };
   if (round > 0 || gamePhase !== 'idle') {
@@ -822,8 +939,15 @@ async function setTerrain(mode) {
   renderBoardFull();
 }
 
-// ==================== INIT ====================
-async function init() {
+// ==================== MAIN MENU ====================
+function menuPlaceholder(name) {
+  addBattleLog(`「${name}」功能开发中，敬请期待`, 'info');
+}
+
+async function startSinglePlayer() {
+  document.getElementById('mainMenu').style.display = 'none';
+  document.getElementById('gameHeader').style.display = 'flex';
+  document.getElementById('gameContent').style.display = 'flex';
   initBoard();
   initSortBar();
   initFilters();
@@ -837,4 +961,4 @@ async function init() {
   }
 }
 
-init();
+// ==================== INIT (no-op; game starts via menu) ====================

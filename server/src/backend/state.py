@@ -12,6 +12,8 @@ AI_ROWS = [0, 1, 2, 3]
 PLACE_PER_ROUND = 5
 DRAW_PER_ROUND = 2
 INIT_DRAW = 10
+FLAG_DRAW = 3
+REGULAR_DRAW = 7
 INIT_TROOPS = 50000
 MAX_TROOPS_PER_UNIT = 10000
 TROOP_INCOME = 10000
@@ -77,6 +79,9 @@ class SideState:
         self.troops = INIT_TROOPS
         self.flag_idx = -1
         self.placed = 0
+        self.flag_generals = []
+        self.locked_flag_ids = []
+        self.current_flag_char_id = None
 
     def to_dict(self):
         return {
@@ -85,6 +90,9 @@ class SideState:
             'troops': self.troops,
             'flag_idx': self.flag_idx,
             'placed': self.placed,
+            'flag_generals': self.flag_generals,
+            'locked_flag_ids': self.locked_flag_ids,
+            'current_flag_char_id': self.current_flag_char_id,
         }
 
 
@@ -110,6 +118,9 @@ class GameState:
         self.scatter_debuff = {}
         self.uid_char_map = {}
         self.uid_side_map = {}
+        self._pending_draw_options = None
+        self.pending_picks = 0
+        self.pending_flag_picks = 0
 
     def _log(self, msg, typ='info'):
         self.battle_log.append({'msg': msg, 'type': typ})
@@ -376,7 +387,8 @@ class GameState:
         self.winner = None
         self._pending_draw_options = None
         self.pending_picks = 0
-        self._log('点击「抽卡」开始初始抽卡（10次三选一）', 'info')
+        self.pending_flag_picks = 0
+        self._log('点击「抽卡」开始初始抽卡（先抽3名旗本，再抽7名武将）', 'info')
 
     def draw_phase(self):
         self._expire_cooldowns()
@@ -438,7 +450,11 @@ class GameState:
         if self.game_phase not in ('idle', 'draw', 'pick_card'):
             raise ValueError('不在抽卡阶段')
         if self.pending_picks <= 0:
-            self.pending_picks = INIT_DRAW if self.round == 0 else DRAW_PER_ROUND
+            if self.round == 0:
+                self.pending_picks = INIT_DRAW
+                self.pending_flag_picks = FLAG_DRAW
+            else:
+                self.pending_picks = DRAW_PER_ROUND
         if len(self.draw_pile) <= 0:
             self.pending_picks = 0
             self.draw_phase()
@@ -458,19 +474,34 @@ class GameState:
             raise ValueError('无效选择')
         self._pending_draw_options = None
         self.player.collection.append(selected)
-        self._log(f'选择了 {selected["name"]}', 'win')
+        is_flag = self.pending_flag_picks > 0
+        if is_flag:
+            self.player.flag_generals.append(deepcopy(selected))
+            self.pending_flag_picks -= 1
+            self._log(f'选择了旗本 {selected["name"]}（剩余{self.pending_flag_picks}名旗本待选）', 'win')
+        else:
+            self._log(f'选择了 {selected["name"]}', 'win')
         unchosen = [c for c in opts if c['id'] != char_id]
         self.draw_pile.extend(unchosen)
         self.pending_picks -= 1
         if self.pending_picks > 0:
+            flag_hint = f'旗本{self.pending_flag_picks}名，' if self.pending_flag_picks > 0 else ''
             self.game_phase = 'pick_card'
-            self._log(f'还需选择{self.pending_picks}张', 'info')
+            self._log(f'还需选择{flag_hint}{self.pending_picks}张', 'info')
             return
         if self.round == 0:
             self._log('初始抽卡完成', 'info')
-            ai_count = min(INIT_DRAW, len(self.draw_pile))
-            ac_arr = self.draw_pile[:ai_count]
-            self.draw_pile = self.draw_pile[ai_count:]
+            # AI gets 3 flag generals
+            ai_flag_count = min(FLAG_DRAW, len(self.draw_pile))
+            af_arr = self.draw_pile[:ai_flag_count]
+            self.draw_pile = self.draw_pile[ai_flag_count:]
+            for c in af_arr:
+                self.ai.flag_generals.append(deepcopy(c))
+                self.ai.collection.append(c)
+            # AI gets 7 regular generals
+            ai_reg_count = min(REGULAR_DRAW, len(self.draw_pile))
+            ac_arr = self.draw_pile[:ai_reg_count]
+            self.draw_pile = self.draw_pile[ai_reg_count:]
             for c in ac_arr:
                 self.ai.collection.append(c)
             if len(self.draw_pile) > 0:
@@ -530,7 +561,7 @@ class GameState:
             raise ValueError('此格已有单位')
         if self._is_behind_enemy_line(cell, True):
             raise ValueError('不可放置在敌方棋子后方')
-        if self._is_in_front_of_friendly(cell, True):
+        if self.round > 1 and self._is_in_front_of_friendly(cell, True):
             raise ValueError('不可放置在友军前方')
         char = next((c for c in self.player.collection if c['id'] == char_id), None)
         if not char:
@@ -554,22 +585,33 @@ class GameState:
         self.player.troops -= troops
         self.placed_this_turn += 1
 
-        if not any(u and self.player.flag_idx == i for i, u in enumerate(self.player.board) if u):
+        is_flag_gen = any(fg['id'] == char_id for fg in self.player.flag_generals)
+        if is_flag_gen:
+            if char_id in self.player.locked_flag_ids:
+                raise ValueError('该旗本已被锁定，无法上场')
+            if self.player.current_flag_char_id is not None and self.player.current_flag_char_id != char_id:
+                raise ValueError('已有旗本在场上，只能同时放置一名旗本')
+            self.player.current_flag_char_id = char_id
             self.player.flag_idx = cell
-
-        is_flag = self.player.flag_idx == cell
-        self._log(f'放置 {char["name"]} {"🚩旗手" if is_flag else ""}', 'win')
+            self._log(f'放置旗本 {char["name"]} 🚩', 'win')
+        else:
+            self._log(f'放置 {char["name"]}', 'win')
 
     def end_placement(self):
         if self.game_phase != 'place_player':
             raise ValueError('不在放置阶段')
         if not any(self.player.board[i] and self.player.flag_idx == i for i in range(64) if self.player.board[i]):
-            first = next((i for i, u in enumerate(self.player.board) if u), None)
-            if first is not None:
-                self.player.flag_idx = first
-                self._log(f'{self.player.board[first].char["name"]} 被指定为旗手🚩', 'info')
+            unlocked = [fg for fg in self.player.flag_generals if fg['id'] not in self.player.locked_flag_ids]
+            has_flag_unit = any(u and u.char['id'] == self.player.current_flag_char_id for u in self.player.board if u)
+            if unlocked and not has_flag_unit and self.player.current_flag_char_id is not None:
+                # flag general was on board but died this turn; don't reassign
+                self.player.flag_idx = -1
+            elif unlocked and not has_flag_unit:
+                self.player.flag_idx = -1
+                self._log('尚未放置旗本，旗手位置空缺', 'info')
             else:
-                raise ValueError('请至少放置一名武将')
+                if not any(u for u in self.player.board if u):
+                    raise ValueError('请至少放置一名武将')
 
         self.game_phase = 'place_ai'
         self._ai_placement()
@@ -578,6 +620,42 @@ class GameState:
     def _auto_place_side(self, side, collection, rows, is_player, max_place=None):
         if max_place is None:
             max_place = PLACE_PER_ROUND
+
+        # First, place unlocked flag generals if none is currently deployed
+        if side.current_flag_char_id is None:
+            unlocked_flags = [fg for fg in side.flag_generals
+                              if fg['id'] not in side.locked_flag_ids
+                              and not any(u and u.char['id'] == fg['id'] for u in self.player.board if u)
+                              and not any(u and u.char['id'] == fg['id'] for u in self.ai.board if u)]
+            if unlocked_flags:
+                # place the highest-rated unlocked flag general
+                unlocked_flags.sort(key=lambda c: RATING_ORDER.get(c.get('rating', ''), 9))
+                best_flag = unlocked_flags[0]
+                front_cut = 6 if is_player else 2
+                candidates = []
+                for r in rows:
+                    for c in range(BOARD_COLS):
+                        i = r * 8 + c
+                        if side.board[i] or self._is_behind_enemy_line(i, is_player) or (self.round > 1 and self._is_in_front_of_friendly(i, is_player)) or not self._is_active_cell(i):
+                            continue
+                        candidates.append(i)
+                if candidates:
+                    shuffle(candidates)
+                    cell = candidates[0]
+                    max_t = min(MAX_TROOPS_PER_UNIT, best_flag['leadership'] * 100, side.troops)
+                    t = max(500, min(max_t, round(best_flag['martial'] * 60 + best_flag['leadership'] * 40)))
+                    self.unit_id_counter += 1
+                    nuid = self.unit_id_counter
+                    u = Unit(best_flag, t, nuid)
+                    side.board[cell] = u
+                    self.uid_char_map[nuid] = best_flag
+                    self.uid_side_map[nuid] = 'player' if is_player else 'ai'
+                    self._pin_from_placement(cell, is_player)
+                    side.troops = max(0, side.troops - t)
+                    side.current_flag_char_id = best_flag['id']
+                    side.flag_idx = cell
+                    max_place -= 1
+
         avail = [c for c in collection
                  if not any(u and u.char['id'] == c['id'] for u in self.player.board if u)
                  and not any(u and u.char['id'] == c['id'] for u in self.ai.board if u)
@@ -597,7 +675,7 @@ class GameState:
         for r in rows:
             for c in range(BOARD_COLS):
                 i = r * 8 + c
-                if side.board[i] or self._is_behind_enemy_line(i, is_player) or self._is_in_front_of_friendly(i, is_player) or not self._is_active_cell(i):
+                if side.board[i] or self._is_behind_enemy_line(i, is_player) or (self.round > 1 and self._is_in_front_of_friendly(i, is_player)) or not self._is_active_cell(i):
                     continue
                 if (r < front_cut) if is_player else (r >= front_cut):
                     front_cells.append(i)
@@ -666,9 +744,7 @@ class GameState:
 
     def _end_ai_place(self):
         if not any(self.ai.board[i] and self.ai.flag_idx == i for i in range(64) if self.ai.board[i]):
-            first = self._find_highest_troops_idx(self.ai.board)
-            if first >= 0:
-                self.ai.flag_idx = first
+            self.ai.flag_idx = -1
         self._log('敌方放置完成', 'info')
         self._advance_phase()
 
@@ -693,11 +769,6 @@ class GameState:
         if placed > 0:
             self.placed_this_turn += placed
             self._log(f'自动放置{placed}名武将', 'info')
-        has_flag = any(u and self.player.flag_idx == i for i, u in enumerate(self.player.board) if u)
-        if not has_flag:
-            first = next((i for i, u in enumerate(self.player.board) if u), None)
-            if first is not None:
-                self.player.flag_idx = first
         self._ai_placement()
         self._end_ai_place()
 
@@ -827,6 +898,29 @@ class GameState:
                 p_moves.append({'from': i, 'to': i, 'unit': self.player.board[i]})
             if self.ai.board[i] and i in engaged_a:
                 a_moves.append({'from': i, 'to': i, 'unit': self.ai.board[i]})
+
+        # Follow: if a front-row unit advances, the unit behind fills its old position
+        p_orig_targets = {m['to'] for m in p_moves if m['to'] != m['from']}
+        a_orig_targets = {m['to'] for m in a_moves if m['to'] != m['from']}
+
+        def _apply_follow(side_moves, claimed):
+            col = {}
+            for m in side_moves:
+                r, c = divmod(m['from'], 8)
+                col.setdefault(c, []).append((r, m))
+            for c in sorted(col):
+                col[c].sort(key=lambda x: x[0])
+                for i in range(len(col[c]) - 1):
+                    front_r, front_m = col[c][i]
+                    back_r, back_m = col[c][i + 1]
+                    if back_r - front_r == 1 and front_m['to'] != front_m['from']:
+                        target = front_m['from']
+                        if target not in claimed:
+                            claimed.add(target)
+                            back_m['to'] = target
+
+        _apply_follow(p_moves, p_orig_targets)
+        _apply_follow(a_moves, a_orig_targets)
 
         p_target_map = {}
         a_target_map = {}
@@ -1198,9 +1292,15 @@ class GameState:
         if p_flag_unit and not any(u and u.uid == p_flag_unit.uid for u in self.player.board if u):
             self.flag_scatter_count['player'] += 1
             self._log(f'⚠ 旗手战死！({self.flag_scatter_count["player"]}/3)', 'lose')
+            self.player.locked_flag_ids.append(p_flag_unit.char['id'])
+            self.player.current_flag_char_id = None
+            self.player.flag_idx = -1
         if a_flag_unit and not any(u and u.uid == a_flag_unit.uid for u in self.ai.board if u):
             self.flag_scatter_count['ai'] += 1
             self._log(f'⚠ 敌方旗手战死！({self.flag_scatter_count["ai"]}/3)', 'win')
+            self.ai.locked_flag_ids.append(a_flag_unit.char['id'])
+            self.ai.current_flag_char_id = None
+            self.ai.flag_idx = -1
 
         for side_is_player in (True, False):
             brd = self.player.board if side_is_player else self.ai.board
@@ -1241,9 +1341,15 @@ class GameState:
                     if p_flag_unit and u.uid == p_flag_unit.uid:
                         self.flag_scatter_count['player'] += 1
                         self._log(f'⚠ 旗手溃散！({self.flag_scatter_count["player"]}/3)', 'lose')
+                        self.player.locked_flag_ids.append(u.char['id'])
+                        self.player.current_flag_char_id = None
+                        self.player.flag_idx = -1
                     if a_flag_unit and u.uid == a_flag_unit.uid:
                         self.flag_scatter_count['ai'] += 1
                         self._log(f'⚠ 敌方旗手溃散！({self.flag_scatter_count["ai"]}/3)', 'win')
+                        self.ai.locked_flag_ids.append(u.char['id'])
+                        self.ai.current_flag_char_id = None
+                        self.ai.flag_idx = -1
                     brd[i] = None
 
         self._try_recruit_ai()
@@ -1258,18 +1364,9 @@ class GameState:
 
         np_idx = find_flag(self.player.board, p_flag_unit)
         self.player.flag_idx = np_idx if np_idx >= 0 else -1
-        if self.player.flag_idx < 0:
-            re = self._find_highest_troops_idx(self.player.board)
-            if re >= 0:
-                self.player.flag_idx = re
-                self._log(f'{self.player.board[re].char["name"]}继任旗手🚩', 'info')
 
         na_idx = find_flag(self.ai.board, a_flag_unit)
         self.ai.flag_idx = na_idx if na_idx >= 0 else -1
-        if self.ai.flag_idx < 0:
-            re = self._find_highest_troops_idx(self.ai.board)
-            if re >= 0:
-                self.ai.flag_idx = re
 
         p_any = any(u for u in self.player.board if u)
         a_any = any(u for u in self.ai.board if u)
@@ -1340,4 +1437,5 @@ class GameState:
             'battle_log': self.battle_log,
             'winner': self.winner,
             'unit_id_counter': self.unit_id_counter,
+            'pending_flag_picks': self.pending_flag_picks,
         }

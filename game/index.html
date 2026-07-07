@@ -8,7 +8,23 @@
 </head>
 <body>
 
-<header>
+<!-- 主菜单 -->
+<div class="main-menu" id="mainMenu">
+  <div class="menu-container">
+    <div class="menu-title">信长之野望<span class="title-sub">战国夺旗</span></div>
+    <div class="menu-subtitle">— 兵者，诡道也 —</div>
+    <div class="menu-buttons">
+      <button class="menu-btn single" onclick="startSinglePlayer()"><span class="menu-icon">⚔</span> 单人模式</button>
+      <button class="menu-btn" onclick="menuPlaceholder('多人模式')"><span class="menu-icon">👥</span> 多人模式</button>
+      <button class="menu-btn" onclick="menuPlaceholder('武将编辑')"><span class="menu-icon">📜</span> 武将编辑</button>
+      <button class="menu-btn" onclick="menuPlaceholder('游戏设置')"><span class="menu-icon">⚙</span> 游戏设置</button>
+      <button class="menu-btn quit" onclick="menuPlaceholder('退出游戏')"><span class="menu-icon">🚪</span> 退出游戏</button>
+    </div>
+    <div class="menu-footer">Powered by FastAPI · 战国风云 <span class="version-badge">v0.0.1</span></div>
+  </div>
+</div>
+
+<header style="display:none" id="gameHeader">
 <h1>⚔ 信长之野望-战国夺旗</h1>
 <div class="terrain-select">
 <button class="btn btn-xs btn-outline active" id="btnTerrainNormal" onclick="setTerrain('normal')">普通</button>
@@ -23,7 +39,7 @@
 </div>
 </header>
 
-<div class="container">
+<div class="container" id="gameContent" style="display:none">
 <div class="board-wrapper">
 <div class="phase-banner" id="phaseBanner">点击「抽卡」开始</div>
 <div class="troop-summary"><span class="total-player">🔵 总兵力 <b id="playerTotalTroops">50000</b></span><span class="flag-scatter p" id="pFlagScatter">🚩溃散 0/3</span><span class="placement-count" id="placementCount">已放 0/5</span><span class="flag-scatter a" id="aFlagScatter">🚩溃散 0/3</span><span class="total-ai">🔴 总兵力 <b id="aiTotalTroops">50000</b></span></div>
@@ -33,6 +49,8 @@
 <button class="btn btn-small" id="btnAutoPlace" onclick="toggleAutoPlay()">托管</button>
 <button class="btn btn-outline btn-small" id="btnEndTurn" onclick="endPlacement()">结束放置</button>
 <button class="btn btn-outline btn-small" onclick="resetGame()">重置</button>
+<button class="btn btn-outline btn-small" onclick="restartGame()">重新开始</button>
+<button class="btn btn-outline btn-small" onclick="backToMenu()" style="margin-left:auto;border-color:#555;color:#999">返回主菜单</button>
 </div>
 </div>
 

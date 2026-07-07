@@ -15,7 +15,7 @@ mimetypes.add_type('image/webp', '.webp')
 class CacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
-        if request.url.path.endswith(('.webp', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff2', '.css', '.js')):
+        if request.url.path.endswith(('.webp', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff2', '.css', '.js')):
             response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
         return response
 

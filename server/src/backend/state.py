@@ -221,6 +221,9 @@ class GameState:
                 if fu and fu is not u and fu.char.get('faction') in u_factions:
                     faction_count += 1
             power *= (1 + faction_count * 0.05)
+        # No flag on board → all units fight at 80%
+        if side.flag_idx == -1:
+            power = round(power * 0.8)
         return max(1, round(power))
 
     def _calc_battle(self, p_unit, a_unit, p_power, a_power, ratio=1):
@@ -242,7 +245,7 @@ class GameState:
     def _calc_ranged_damage(self, attacker, defender, atk_power, def_power):
         total = atk_power + def_power
         intel_factor = attacker.char['intelligence'] / 100
-        dmg = round(attacker.troops * (atk_power / total) * intel_factor * 0.25) if total > 0 else 1
+        dmg = round(attacker.troops * (atk_power / total) * intel_factor * 0.20) if total > 0 else 1
         return max(1, dmg)
 
     def _has_adjacent_enemy(self, idx, is_player):
@@ -417,7 +420,7 @@ class GameState:
             best = max(('leadership','martial','intelligence','politics'), key=lambda k: c.get(k,0))
             c[best] = round(c.get(best,0) * 1.10)
 
-    def reset_game(self):
+    def reset_game(self, include_custom_generals=True):
         all_chars = load_characters()
         # Attach default faction info from relation data (before edits, so edits can override)
         for c in all_chars:
@@ -437,20 +440,21 @@ class GameState:
         # Apply type-based stat multipliers
         for c in all_chars:
             self._apply_type_bonus(c)
-        # Add custom generals to the pool
+        # Add custom generals to the pool (if enabled)
         all_game_chars = list(all_chars)
-        for cg in custom_generals.values():
-            cg_copy = deepcopy(cg)
-            if 'faction' not in cg_copy:
-                cf = relations.get_faction(cg_copy.get('name', ''))
-                if cf:
-                    cg_copy['faction'] = cf
-                    cg_copy['factions'] = relations.get_factions(cg_copy.get('name', ''))
-                lord = relations.get_lord(cf) if cf else None
-                if lord:
-                    cg_copy['lord_name'] = lord
-            self._apply_type_bonus(cg_copy)
-            all_game_chars.append(cg_copy)
+        if include_custom_generals:
+            for cg in custom_generals.values():
+                cg_copy = deepcopy(cg)
+                if 'faction' not in cg_copy:
+                    cf = relations.get_faction(cg_copy.get('name', ''))
+                    if cf:
+                        cg_copy['faction'] = cf
+                        cg_copy['factions'] = relations.get_factions(cg_copy.get('name', ''))
+                    lord = relations.get_lord(cf) if cf else None
+                    if lord:
+                        cg_copy['lord_name'] = lord
+                self._apply_type_bonus(cg_copy)
+                all_game_chars.append(cg_copy)
         self.draw_pile = [deepcopy(c) for c in all_game_chars]
         shuffle(self.draw_pile)
         self.player = SideState()
@@ -673,6 +677,14 @@ class GameState:
             raise ValueError('兵力不足')
         if troops > min(MAX_TROOPS_PER_UNIT, char['leadership'] * 100):
             raise ValueError('兵力超出上限')
+
+        # No flag on board → next placement must be a flag general
+        if self.player.flag_idx == -1:
+            unlocked_flags = [fg for fg in self.player.flag_generals if fg['id'] not in self.player.locked_flag_ids]
+            if unlocked_flags:
+                is_flag_gen = any(fg['id'] == char_id for fg in unlocked_flags)
+                if not is_flag_gen:
+                    raise ValueError('旗本不在场上，必须先放置旗本武将')
 
         self.unit_id_counter += 1
         uid = self.unit_id_counter

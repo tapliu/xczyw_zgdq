@@ -30,11 +30,15 @@ def get_game_or_404(game_id: str):
     return game
 
 
+class NewGameRequest(BaseModel):
+    include_custom_generals: bool = True
+
 @router.post('/game/new')
-def new_game():
+def new_game(body: NewGameRequest = None):
     game_id = str(uuid.uuid4())
     game = GameState(game_id)
-    game.reset_game()
+    include_custom = body.include_custom_generals if body else True
+    game.reset_game(include_custom_generals=include_custom)
     games[game_id] = game
     return {'game_id': game_id, 'state': game.to_dict()}
 

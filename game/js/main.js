@@ -82,6 +82,7 @@ let playerCatFilter = 'all', aiCatFilter = 'all', playerSortBy = 'default';
 let avatarCache = {};
 let playerCooldowns = [], aiCooldowns = [];
 let autoPlay = false;
+let quickDrawMode = false;
 let scatterDebuff = {}, deadList = [], flagScatterCount = { player: 0, ai: 0 };
 let spectatorPool = [];
 let pendingFlagPicks = 0;
@@ -958,9 +959,27 @@ async function drawPhase() {
       if (pendingFlagPicks > 0) {
         setPhase(`🎴 选择旗本武将（${pendingFlagPicks}名剩余）`);
       }
+      if (quickDrawMode) {
+        setTimeout(() => {
+          autoPickCard();
+          if (gamePhase !== 'pick_card') quickDrawMode = false;
+        }, 60);
+      }
     }
   } catch (e) {
     addBattleLog('抽卡失败：' + e.message, 'lose');
+    quickDrawMode = false;
+  }
+}
+
+function quickDrawPhase() {
+  quickDrawMode = true;
+  document.getElementById('pickAutoBtn').disabled = true;
+  document.getElementById('pickQuickBtn').disabled = true;
+  if (gamePhase === 'pick_card') {
+    autoPickCard();
+  } else {
+    drawPhase();
   }
 }
 
@@ -1005,9 +1024,20 @@ async function pickCard(charId) {
     applyStateFromServer(data.state);
     if (gamePhase === 'pick_card') {
       drawPhase();
+    } else {
+      quickDrawMode = false;
+      const qb = document.getElementById('pickQuickBtn');
+      if (qb) qb.disabled = false;
+      const ab = document.getElementById('pickAutoBtn');
+      if (ab) ab.disabled = false;
     }
   } catch (e) {
     addBattleLog('选卡失败：' + e.message, 'lose');
+    quickDrawMode = false;
+    const qb = document.getElementById('pickQuickBtn');
+    if (qb) qb.disabled = false;
+    const ab = document.getElementById('pickAutoBtn');
+    if (ab) ab.disabled = false;
   }
 }
 
@@ -1380,6 +1410,7 @@ async function resetAllEdits() {
 })();
 
 async function startSinglePlayer() {
+  const includeCustom = confirm('本局对战是否加入自建武将？\n\n选择「确定」：自建武将将加入卡池\n选择「取消」：仅使用预设武将');
   document.getElementById('mainMenu').style.display = 'none';
   document.getElementById('gameHeader').style.display = 'flex';
   document.getElementById('gameContent').style.display = 'flex';
@@ -1387,7 +1418,7 @@ async function startSinglePlayer() {
   initSortBar();
   initFilters();
   try {
-    const data = await api.newGame();
+    const data = await api.newGame({ include_custom_generals: includeCustom });
     gameId = data.game_id;
     applyStateFromServer(data);
   } catch (e) {
@@ -1464,6 +1495,7 @@ function resetCustomForm() {
   document.getElementById('cgName').value = '';
   document.getElementById('cgType').value = '全能';
   document.getElementById('cgFaction').value = '群雄';
+  document.getElementById('cgIdentity').value = '非大名';
   ['cgLead','cgMar','cgInt','cgPol'].forEach(id => {
     document.getElementById(id).value = 50;
   });
@@ -1531,7 +1563,7 @@ function updateCgPreview() {
     <div class="cg-prev-info">
       <div style="font-weight:600;color:#f5a623">${escHtml(name)}</div>
       <div style="color:${fColor};font-size:10px">${faction}</div>
-      <div>${type} · 统${ld} 武${mr} 智${it} 政${po} · 总分${total}</div>
+      <div>${document.getElementById('cgIdentity').value} · ${type} · 统${ld} 武${mr} 智${it} 政${po} · 总分${total}</div>
     </div>`;
 }
 
@@ -1544,6 +1576,7 @@ async function loadCustomGeneralForEdit(id) {
     document.getElementById('cgName').value = g.name || '';
     document.getElementById('cgType').value = g.type || '全能';
     document.getElementById('cgFaction').value = g.faction || '群雄';
+    document.getElementById('cgIdentity').value = g.identity || '非大名';
     document.getElementById('cgLead').value = g.leadership || 50;
     document.getElementById('cgMar').value = g.martial || 50;
     document.getElementById('cgInt').value = g.intelligence || 50;
@@ -1605,6 +1638,7 @@ async function saveCustomGeneral() {
     name, type,
     leadership: ld2, martial: mr2, intelligence: it2, politics: po2,
     total_score: total, rating,
+    identity: document.getElementById('cgIdentity').value,
     faction: document.getElementById('cgFaction').value,
     avatarId: cgSelectedAvatar,
   };
@@ -1650,6 +1684,7 @@ async function listCustomGenerals() {
         <div class="ec-avatar-row"><img class="ec-avatar" src="${generateAvatar({id:g.avatarId||g.id,name:g.name,rating:g.rating||'C',type:g.type||'全能'}, 48)}"></div>
         <div class="ec-name-static">${escHtml(g.name)}</div>
         <div class="ec-field"><span class="ec-label">类</span><span>${g.type||'全能'}</span></div>
+        <div class="ec-field"><span class="ec-label">身份</span><span style="color:#f5a623">${g.identity||'非大名'}</span></div>
         <div class="ec-field"><span class="ec-label">评</span><span style="color:${RATING_COLORS[g.rating]||'#ccc'}">${g.rating||'C'}</span></div>
         <div style="font-size:10px;color:#888;margin-top:4px">统${g.leadership} 武${g.martial} 智${g.intelligence} 政${g.politics}</div>
         <div style="font-size:9px;color:#4fc3f7">总分 ${total}</div>

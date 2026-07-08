@@ -101,7 +101,7 @@
 
 <div class="troop-modal" id="pickModal">
 <div class="modal" style="max-width:700px">
-<div class="pick-hdr"><h2>选择一张武将牌</h2><button class="btn btn-outline btn-small" id="pickAutoBtn" onclick="autoPickCard()">🤖 自动</button></div>
+<div class="pick-hdr"><h2>选择一张武将牌</h2><button class="btn btn-small" id="pickQuickBtn" onclick="quickDrawPhase()" style="background:#f5a623;color:#111;border:none;font-weight:700">一键抽取</button><button class="btn btn-outline btn-small" id="pickAutoBtn" onclick="autoPickCard()">自动选择</button></div>
 <div class="pick-grid" id="pickGrid"></div>
 </div>
 </div>
@@ -196,6 +196,12 @@
         </div>
         <div class="cg-field"><span class="cg-label">势力</span>
           <select class="cg-input" id="cgFaction"></select>
+        </div>
+        <div class="cg-field"><span class="cg-label">身份</span>
+          <select class="cg-input" id="cgIdentity">
+            <option>非大名</option>
+            <option>大名</option>
+          </select>
         </div>
         <div class="cg-field"><span class="cg-label">统</span><input class="cg-input cg-stat" id="cgLead" type="number" min="1" max="100" value="50"></div>
         <div class="cg-field"><span class="cg-label">武</span><input class="cg-input cg-stat" id="cgMar" type="number" min="1" max="100" value="50"></div>

@@ -8,7 +8,7 @@ const api = {
     if (!res.ok) { const err = await res.json().catch(() => ({detail: res.statusText})); throw new Error(err.detail || 'API Error'); }
     return res.json();
   },
-  newGame() { return this.request('POST', '/api/game/new'); },
+  newGame(body) { return this.request('POST', '/api/game/new', body); },
   getState(gameId) { return this.request('GET', `/api/game/${gameId}`); },
   draw(gameId) { return this.request('POST', `/api/game/${gameId}/draw`); },
   drawOptions(gameId) { return this.request('POST', `/api/game/${gameId}/draw-options`); },

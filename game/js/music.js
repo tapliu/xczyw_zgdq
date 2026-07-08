@@ -49,14 +49,17 @@ const MusicManager = {
     }
   },
 
-  _onEnded() {
-    if (this._scene === 'battle') this.play('battle');
-  },
-
   stop() {
     this._audio.pause();
     this._audio.src = '';
     this._battleIndex = -1;
+  },
+
+  preload(src) {
+    if (this._audio.src) return;
+    this._audio.preload = 'auto';
+    this._audio.src = src;
+    this._audio.load();
   },
 
   setVolume(v) {
@@ -76,6 +79,12 @@ const MusicManager = {
 
   isEnabled() { return this._enabled; },
   getVolume() { return this._volume; },
+
+  _onEnded() {
+    if (this._scene === 'battle') this.play('battle');
+  },
 };
 
 MusicManager._audio.addEventListener('ended', () => MusicManager._onEnded());
+// Start preloading menu music immediately
+MusicManager.preload('/music/bgm_menu_01.m4a');

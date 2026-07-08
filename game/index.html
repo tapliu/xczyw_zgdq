@@ -8,6 +8,19 @@
 </head>
 <body>
 
+<div id="bgmBtn" onclick="toggleMusic()" style="position:fixed;top:12px;right:12px;z-index:99999;cursor:pointer;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:4px 10px;font-size:12px;color:#ccc;display:flex;align-items:center;gap:4px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);transition:.2s" title="切换背景音乐">♪ BGM</div>
+
+<!-- 游戏设置 -->
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-screen">
+    <div class="settings-hdr"><h2>⚙ 游戏设置</h2><button class="btn btn-outline btn-small" onclick="closeSettings()">关闭</button></div>
+    <div class="settings-body">
+      <div class="settings-row"><span class="settings-label">背景音乐</span><button class="btn btn-small btn-outline" id="settingsMusicToggle" onclick="toggleMusic()">♪ 关闭</button></div>
+      <div class="settings-row"><span class="settings-label">音量</span><input type="range" id="settingsVolume" min="0" max="100" value="40" oninput="setMusicVolume(this.value)"><span class="settings-val" id="settingsVolDisplay">40</span></div>
+    </div>
+  </div>
+</div>
+
 <!-- 主菜单 -->
 <div class="main-menu" id="mainMenu">
   <div class="menu-container" id="menuContainer">
@@ -36,7 +49,6 @@
 <button class="btn btn-xs btn-outline active" id="btnTerrainNormal" onclick="setTerrain('normal')">普通</button>
 <button class="btn btn-xs btn-outline" id="btnTerrainNagashino" onclick="setTerrain('nagashino')">长篠</button>
 <button class="btn btn-xs btn-outline" id="btnTerrainTennozan" onclick="setTerrain('tennozan')">天王山</button>
-<button class="btn btn-xs btn-outline" id="btnMusicToggle" onclick="toggleMusic()" style="margin-left:auto">♪ BGM</button>
 </div>
 <div class="header-info">
 <span class="stat">回合 <b class="round-display" id="roundDisplay">0</b></span>

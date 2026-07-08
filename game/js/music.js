@@ -75,4 +75,5 @@ const MusicManager = {
   },
 
   isEnabled() { return this._enabled; },
+  getVolume() { return this._volume; },
 };

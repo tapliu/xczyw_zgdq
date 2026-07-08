@@ -1189,6 +1189,7 @@ async function setTerrain(mode) {
 
 // ==================== MAIN MENU ====================
 function menuPlaceholder(name) {
+  if (name === '游戏设置') { openSettings(); return; }
   addBattleLog(`「${name}」功能开发中，敬请期待`, 'info');
 }
 
@@ -1410,8 +1411,29 @@ async function resetAllEdits() {
 
 function toggleMusic() {
   const enabled = MusicManager.toggle();
-  const btn = document.getElementById('btnMusicToggle');
-  if (btn) btn.textContent = enabled ? '♪ BGM' : '♪ BGM OFF';
+  const bgmBtn = document.getElementById('bgmBtn');
+  if (bgmBtn) bgmBtn.textContent = enabled ? '♪ BGM' : '♪ BGM OFF';
+  const settingsBtn = document.getElementById('settingsMusicToggle');
+  if (settingsBtn) settingsBtn.textContent = enabled ? '♪ 开启' : '♪ 关闭';
+}
+
+function setMusicVolume(val) {
+  const v = parseInt(val) / 100;
+  MusicManager.setVolume(v);
+  document.getElementById('settingsVolDisplay').textContent = val;
+}
+
+function closeSettings() {
+  document.getElementById('settingsOverlay').classList.remove('show');
+}
+
+function openSettings() {
+  document.getElementById('settingsOverlay').classList.add('show');
+  const vol = Math.round(MusicManager.getVolume() * 100);
+  document.getElementById('settingsVolume').value = vol;
+  document.getElementById('settingsVolDisplay').textContent = vol;
+  const enabled = MusicManager.isEnabled();
+  document.getElementById('settingsMusicToggle').textContent = enabled ? '♪ 开启' : '♪ 关闭';
 }
 
 // Random poster background on load
@@ -1421,11 +1443,19 @@ function toggleMusic() {
   bg.className = 'main-menu-bg';
   bg.style.backgroundImage = `url(posters/${n}.webp)`;
   document.getElementById('mainMenu').insertBefore(bg, document.getElementById('mainMenu').firstChild);
-  MusicManager.play('menu');
+  // Start menu music on first user interaction (browsers block autoplay)
+  const startMusic = () => {
+    MusicManager.play('menu');
+    document.removeEventListener('click', startMusic);
+    document.removeEventListener('touchstart', startMusic);
+  };
+  document.addEventListener('click', startMusic, { once: true });
+  document.addEventListener('touchstart', startMusic, { once: true });
 })();
 
 async function startSinglePlayer() {
   const includeCustom = confirm('本局对战是否加入自建武将？\n\n选择「确定」：自建武将将加入卡池\n选择「取消」：仅使用预设武将');
+  MusicManager.play('menu');
   document.getElementById('mainMenu').style.display = 'none';
   document.getElementById('gameHeader').style.display = 'flex';
   document.getElementById('gameContent').style.display = 'flex';
@@ -1723,5 +1753,12 @@ function showToast(msg, type) {
   window._toast.classList.add('show');
   setTimeout(() => window._toast.classList.remove('show'), 2500);
 }
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    const ov = document.getElementById('settingsOverlay');
+    if (ov.classList.contains('show')) ov.classList.remove('show');
+  }
+});
 
 // ==================== INIT (no-op; game starts via menu) ====================

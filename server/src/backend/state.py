@@ -1528,6 +1528,15 @@ class GameState:
         self.terrain_mode = mode
 
     def to_dict(self):
+        # Strip hit_details from combat_stats during regular play to reduce payload
+        is_gameover = self.game_phase == 'gameover'
+        combat_stats_out = {}
+        for k, v in self.combat_stats.items():
+            entry = dict(v)
+            if not is_gameover:
+                entry.pop('melee_hit_details', None)
+                entry.pop('ranged_hit_details', None)
+            combat_stats_out[str(k)] = entry
         return {
             'game_id': self.game_id,
             'round': self.round,
@@ -1539,13 +1548,13 @@ class GameState:
             'flag_scatter_count': dict(self.flag_scatter_count),
             'dead_list': list(self.dead_list),
             'spectator_pool': self.spectator_pool,
-            'combat_stats': {str(k): v for k, v in self.combat_stats.items()},
+            'combat_stats': combat_stats_out,
             'player_cooldowns': self.player_cooldowns,
             'ai_cooldowns': self.ai_cooldowns,
             'terrain_mode': self.terrain_mode,
             'uid_char_map': {str(k): v for k, v in self.uid_char_map.items()},
             'uid_side_map': {str(k): v for k, v in self.uid_side_map.items()},
-            'battle_log': self.battle_log,
+            'battle_log': self.battle_log[-200:],
             'winner': self.winner,
             'unit_id_counter': self.unit_id_counter,
             'pending_flag_picks': self.pending_flag_picks,

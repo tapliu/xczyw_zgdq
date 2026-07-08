@@ -210,7 +210,10 @@ header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webk
 #victoryOverlay .v-btn:hover{transform:scale(1.05)}
 #victoryOverlay .v-rankings{display:flex;flex-direction:column;gap:10px;margin:10px 0;text-align:left}
 #victoryOverlay .v-rank-section{border-radius:10px;padding:10px;background:rgba(0,0,0,.35)}
-#victoryOverlay .v-rank-title{font-size:13px;font-weight:700;color:#f5a623;margin-bottom:6px;text-align:center}
+#victoryOverlay .v-rank-title{font-size:13px;font-weight:700;color:#f5a623;margin-bottom:6px;text-align:center;display:flex;justify-content:space-between;align-items:center}
+#victoryOverlay .v-rank-title .v-expand-btn{font-size:11px;font-weight:400;color:#888;cursor:pointer;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.08);transition:.15s;user-select:none}
+#victoryOverlay .v-rank-title .v-expand-btn:hover{color:#f5a623;background:rgba(245,166,35,.15)}
+#victoryOverlay .v-rank-entry-hidden{display:none !important}
 #victoryOverlay .v-rank-entry{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;background:rgba(255,255,255,.06);margin-bottom:4px}
 #victoryOverlay .v-rank-entry:last-child{margin-bottom:0}
 #victoryOverlay .v-rank-num{font-size:12px;font-weight:700;color:#f5a623;width:18px;text-align:center;flex-shrink:0}

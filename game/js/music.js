@@ -34,15 +34,16 @@ const MusicManager = {
   play(scene) {
     if (scene === this._scene && !this._audio.paused) return;
     this._scene = scene;
-    if (!this._enabled) { this.stop(); return; }
+    if (!this._enabled) { return; }
 
     const track = scene === 'battle' ? this._nextBattle() : this._tracks[scene];
     if (!track) return;
 
     this._audio.loop = track.loop !== false;
     this._audio.volume = this._volume;
-    if (this._audio.src !== track.src) {
-      this._audio.src = track.src;
+    const absSrc = track.src.startsWith('/') ? new URL(track.src, location.origin).href : track.src;
+    if (this._audio.src !== absSrc) {
+      this._audio.src = absSrc;
       this._audio.play().catch(e => console.warn('Music play error:', e));
     } else if (this._audio.paused) {
       this._audio.play().catch(e => console.warn('Music resume error:', e));
@@ -51,15 +52,8 @@ const MusicManager = {
 
   stop() {
     this._audio.pause();
-    this._audio.src = '';
+    this._audio.currentTime = 0;
     this._battleIndex = -1;
-  },
-
-  preload(src) {
-    if (this._audio.src) return;
-    this._audio.preload = 'auto';
-    this._audio.src = src;
-    this._audio.load();
   },
 
   setVolume(v) {
@@ -72,7 +66,7 @@ const MusicManager = {
     if (this._enabled) {
       if (this._scene) this.play(this._scene);
     } else {
-      this.stop();
+      this._audio.pause();
     }
     return this._enabled;
   },
@@ -86,5 +80,4 @@ const MusicManager = {
 };
 
 MusicManager._audio.addEventListener('ended', () => MusicManager._onEnded());
-// Start preloading menu music immediately
-MusicManager.preload('/music/bgm_menu_01.m4a');
+MusicManager._audio.preload = 'auto';

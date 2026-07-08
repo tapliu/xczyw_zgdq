@@ -723,6 +723,15 @@ function addBattleLog(msg, type='info') {
 // ==================== UI ====================
 function setPhase(msg) { document.getElementById('phaseBanner').innerHTML = msg; }
 
+function toggleRankExpand(id) {
+  const items = document.querySelectorAll(`[data-expand="${id}"]`);
+  const btn = document.querySelector(`[data-expand-btn="${id}"]`);
+  if (!btn) return;
+  const isExpanded = btn.classList.toggle('expanded');
+  items.forEach(el => el.classList.toggle('v-rank-entry-hidden', !isExpanded));
+  btn.textContent = isExpanded ? '收起 ▴' : '展开 ▾';
+}
+
 function showVictory(win) {
   const ov=document.getElementById('victoryOverlay');
   document.getElementById('vIcon').textContent=win?'🏆':'💀';
@@ -732,49 +741,14 @@ function showVictory(win) {
   document.getElementById('vIcon').style.animation='vBounce 1s ease-out';
   const mvpEl=document.getElementById('mvpDisplay');
   const side=win?player:ai;
-  let bestUid=null, bestDmg=-1, bestChar=null;
-  for (const uid in combatStats) {
-    const unitOnBoard = side.board.some(u=>u&&u.uid==uid);
-    const stat=combatStats[uid];
-    if (unitOnBoard && stat.damage>bestDmg) { bestDmg=stat.damage; bestUid=uid; }
-  }
-  if (bestUid) {
-    for (const u of side.board) if (u&&u.uid==bestUid) { bestChar=u.char; break; }
-    if (!bestChar) bestChar = uidCharMap[bestUid] || null;
-  }
-  if (bestChar) {
-    const s=combatStats[bestUid];
-    const avgMelee=s.meleeHits>0?Math.round(s.meleeDmg/s.meleeHits):0;
-    const avgRanged=s.rangedHits>0?Math.round(s.rangedDmg/s.rangedHits):0;
-    // compute damage received by MVP
-    let mvpSlot = -1;
-    for (let i=0; i<player.board.length; i++) {
-      if ((player.board[i]&&player.board[i].uid==bestUid)||(ai.board[i]&&ai.board[i].uid==bestUid)) { mvpSlot=i; break; }
-    }
-    let rcvdMeleeDmg=0, rcvdMeleeHits=0, rcvdRangedDmg=0, rcvdRangedHits=0;
-    if (mvpSlot>=0) {
-      const mvpSlotKey = String(mvpSlot);
-      for (const uid in combatStats) {
-        if (uid==bestUid) continue;
-        const st = combatStats[uid];
-        if (st.melee_hit_details) for (const h of st.melee_hit_details) { if (h.target==mvpSlotKey) { rcvdMeleeDmg+=h.dmg; rcvdMeleeHits++; } }
-        if (st.ranged_hit_details) for (const h of st.ranged_hit_details) { if (h.target==mvpSlotKey) { rcvdRangedDmg+=h.dmg; rcvdRangedHits++; } }
-      }
-    }
-    const avgRcvdMelee=rcvdMeleeHits>0?Math.round(rcvdMeleeDmg/rcvdMeleeHits):0;
-    const avgRcvdRanged=rcvdRangedHits>0?Math.round(rcvdRangedDmg/rcvdRangedHits):0;
-    mvpEl.style.display='block';
-    mvpEl.innerHTML=`<div class="v-mvp"><div class="v-mvp-title">🏅 MVP — ${bestChar.name}</div><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><img class="v-mvp-avatar" src="${generateAvatar(bestChar,56)}"><div><div class="v-mvp-name">${bestChar.name}</div><div class="v-mvp-meta">${renderFactionBadges(getFactions(bestChar))} · ${bestChar.type||''} · ${bestChar.rating||''} · 统${bestChar.leadership} 武${bestChar.martial} 智${bestChar.intelligence} 政${bestChar.politics}</div></div></div><div class="v-mvp-sub-title">⚔ 造成伤害</div><div class="v-mvp-row"><span class="lab">总伤害</span><span class="val">${s.damage.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战</span><span class="val">${s.meleeHits}次 · 均伤 ${avgMelee.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程</span><span class="val">${s.rangedHits}次 · 均伤 ${avgRanged.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">击溃/击毙</span><span class="val">${s.kills}人</span></div><div class="v-mvp-row"><span class="lab">大威风</span><span class="val">${s.retreatTriggers}次</span></div>${rcvdMeleeHits||rcvdRangedHits?`<div class="v-mvp-sub-title" style="margin-top:6px">🛡 受到伤害</div>${rcvdMeleeHits?`<div class="v-mvp-row"><span class="lab">近战</span><span class="val">${rcvdMeleeHits}次 · 均伤 ${avgRcvdMelee.toLocaleString()}</span></div>`:''}${rcvdRangedHits?`<div class="v-mvp-row"><span class="lab">远程</span><span class="val">${rcvdRangedHits}次 · 均伤 ${avgRcvdRanged.toLocaleString()}</span></div>`:''}`:''}</div>`;
-  } else {
-    mvpEl.style.display='none';
-  }
-  const rankEl=document.getElementById('rankDisplay');
+
+  // Aggregate combat stats by char.id (unifies damage across retreat/re-deploy)
   const charAgg = {};
   for (const uid in combatStats) {
     const ch = uidCharMap[uid];
     if (!ch) continue;
     const cid = ch.id;
-    if (!charAgg[cid]) charAgg[cid] = { char: ch, side: uidSideMap[uid] || 'player', damage: 0, meleeDmg: 0, rangedDmg: 0, meleeHits: 0, rangedHits: 0, kills: 0, retreatTriggers: 0, meleeHitDetails: [], rangedHitDetails: [] };
+    if (!charAgg[cid]) charAgg[cid] = { char: ch, side: uidSideMap[uid] || 'player', damage: 0, meleeDmg: 0, rangedDmg: 0, meleeHits: 0, rangedHits: 0, kills: 0, retreatTriggers: 0, damage_to: {}, damage_from: {} };
     const s = combatStats[uid];
     charAgg[cid].damage += s.damage || 0;
     charAgg[cid].meleeDmg += s.meleeDmg || 0;
@@ -783,105 +757,90 @@ function showVictory(win) {
     charAgg[cid].rangedHits += s.rangedHits || 0;
     charAgg[cid].kills += s.kills || 0;
     charAgg[cid].retreatTriggers += s.retreatTriggers || 0;
-    if (s.melee_hit_details) charAgg[cid].meleeHitDetails.push(...s.melee_hit_details);
-    if (s.ranged_hit_details) charAgg[cid].rangedHitDetails.push(...s.ranged_hit_details);
+    for (const [tuid, d] of Object.entries(s.damage_to || {})) {
+      const tch = uidCharMap[tuid];
+      if (tch) charAgg[cid].damage_to[tch.id] = (charAgg[cid].damage_to[tch.id] || 0) + d;
+    }
+    for (const [suid, d] of Object.entries(s.damage_from || {})) {
+      const sch = uidCharMap[suid];
+      if (sch) charAgg[cid].damage_from[sch.id] = (charAgg[cid].damage_from[sch.id] || 0) + d;
+    }
   }
-  const allStats = Object.values(charAgg);
-  const sideLabel = s => s==='player'?'<span class="v-rank-side p">己</span>':'<span class="v-rank-side a">敌</span>';
-  const entryHTML = (item, rank, valLabel, valKey, hitKey) => {
-    const v = valKey ? item[valKey] : item;
-    const hits = hitKey && item[hitKey] ? item[hitKey].map(h => h.dmg) : [];
-    const avg = hits.length ? (hits.reduce((a,b)=>a+b, 0) / hits.length).toFixed(1) : '';
-    return `<div class="v-rank-entry"><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span>${sideLabel(item.side)}<span class="v-rank-val">${typeof v==='number'?v.toLocaleString():v}${valLabel}</span>${avg ? `<div class="v-rank-hits">均伤 ${avg}</div>` : ''}</div>`;
-  };
-  const topN = (arr, key, n=3) => arr.filter(i=>i[key]>0).sort((a,b)=>b[key]-a[key]).slice(0,n);
-  const killsTop = topN(allStats, 'kills');
-  const meleeTop = topN(allStats, 'meleeDmg');
-  const rangedTop = topN(allStats, 'rangedDmg');
 
-  // Top row: MVP damage sections (2 columns)
-  let topHtml = '<div class="v-rank-grid v-top-grid">';
-  if (bestUid) {
-    const mvpStat = combatStats[bestUid];
-    // find MVP's slot
-    let mvpSlot = -1;
-    for (let i=0;i<64;i++) { if ((player.board[i]&&player.board[i].uid==bestUid)||(ai.board[i]&&ai.board[i].uid==bestUid)) { mvpSlot=i; break; } }
-    // build slot→UID map
-    const slotToUid = {};
-    for (let i=0;i<64;i++) {
-      if (player.board[i]) slotToUid[i]=player.board[i].uid;
-      else if (ai.board[i]) slotToUid[i]=ai.board[i].uid;
-    }
-    // count hits per target UID from MVP's hit_details
-    const dealtHitCount = {};
-    if (mvpStat.melee_hit_details) for (const h of mvpStat.melee_hit_details) { const tuid=slotToUid[+h.target]; if (tuid) dealtHitCount[tuid]=(dealtHitCount[tuid]||0)+1; }
-    if (mvpStat.ranged_hit_details) for (const h of mvpStat.ranged_hit_details) { const tuid=slotToUid[+h.target]; if (tuid) dealtHitCount[tuid]=(dealtHitCount[tuid]||0)+1; }
-    // count hits per attacker UID against MVP's slot
-    const recvHitCount = {};
-    const sk = String(mvpSlot);
-    if (mvpSlot>=0) for (const uid in combatStats) {
-      if (uid==bestUid) continue;
-      const st = combatStats[uid];
-      if (st.melee_hit_details) for (const h of st.melee_hit_details) { if (h.target==sk) recvHitCount[uid]=(recvHitCount[uid]||0)+1; }
-      if (st.ranged_hit_details) for (const h of st.ranged_hit_details) { if (h.target==sk) recvHitCount[uid]=(recvHitCount[uid]||0)+1; }
-    }
-    if (mvpStat && mvpStat.damage_to) {
-      const dealtAgg = {};
-      for (const [uid, d] of Object.entries(mvpStat.damage_to)) {
-        const ch = uidCharMap[uid];
-        if (!ch) continue;
-        dealtAgg[ch.id] = dealtAgg[ch.id] || { char: ch, damage: 0, hits: 0 };
-        dealtAgg[ch.id].damage += d;
-        dealtAgg[ch.id].hits += dealtHitCount[uid]||0;
-      }
-      const dealt = Object.values(dealtAgg).sort((a,b)=>b.damage-a.damage).slice(0,3);
-      topHtml+='<div class="v-rank-section"><div class="v-rank-title">🗡 MVP造成伤害 TOP3</div>';
-      if (dealt.length) dealt.forEach((item,i)=>{
-        const avg = item.hits>0 ? (item.damage/item.hits).toFixed(1) : '';
-        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span>${avg?`<div class="v-rank-hits">${item.hits}次 · 均伤 ${avg}</div>`:''}</div>`;
-      });
-      else topHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
-      topHtml+='</div>';
-    }
-    if (mvpStat && mvpStat.damage_from) {
-      const recvAgg = {};
-      for (const [uid, d] of Object.entries(mvpStat.damage_from)) {
-        const ch = uidCharMap[uid];
-        if (!ch) continue;
-        recvAgg[ch.id] = recvAgg[ch.id] || { char: ch, damage: 0, hits: 0 };
-        recvAgg[ch.id].damage += d;
-        recvAgg[ch.id].hits += recvHitCount[uid]||0;
-      }
-      const received = Object.values(recvAgg).sort((a,b)=>b.damage-a.damage).slice(0,3);
-      topHtml+='<div class="v-rank-section"><div class="v-rank-title">🛡 对MVP造成伤害 TOP3</div>';
-      if (received.length) received.forEach((item,i)=>{
-        const avg = item.hits>0 ? (item.damage/item.hits).toFixed(1) : '';
-        topHtml+=`<div class="v-rank-entry"><span class="v-rank-num">${i+1}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span>${avg?`<div class="v-rank-hits">${item.hits}次 · 均伤 ${avg}</div>`:''}</div>`;
-      });
-      else topHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
-      topHtml+='</div>';
-    }
+  // Find MVP: character with most total damage that is still on the board
+  let bestCid = null, bestDmg = -1;
+  for (const cid in charAgg) {
+    const isOnBoard = side.board.some(u => u && u.char.id == cid);
+    if (isOnBoard && charAgg[cid].damage > bestDmg) { bestDmg = charAgg[cid].damage; bestCid = cid; }
   }
-  topHtml+='</div>';
+  const bestChar = bestCid ? charAgg[bestCid].char : null;
+
+  if (bestChar) {
+    const agg = charAgg[bestCid];
+    const avgMelee = agg.meleeHits > 0 ? Math.round(agg.meleeDmg / agg.meleeHits) : 0;
+    const avgRanged = agg.rangedHits > 0 ? Math.round(agg.rangedDmg / agg.rangedHits) : 0;
+    mvpEl.style.display = 'block';
+    mvpEl.innerHTML = `<div class="v-mvp"><div class="v-mvp-title">🏅 MVP — ${bestChar.name}</div><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><img class="v-mvp-avatar" src="${generateAvatar(bestChar,56)}"><div><div class="v-mvp-name">${bestChar.name}</div><div class="v-mvp-meta">${renderFactionBadges(getFactions(bestChar))} · ${bestChar.type||''} · ${bestChar.rating||''} · 统${bestChar.leadership} 武${bestChar.martial} 智${bestChar.intelligence} 政${bestChar.politics}</div></div></div><div class="v-mvp-sub-title">⚔ 造成伤害</div><div class="v-mvp-row"><span class="lab">总伤害</span><span class="val">${agg.damage.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战总伤</span><span class="val">${agg.meleeDmg.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战</span><span class="val">${agg.meleeHits}次 · 均伤 ${avgMelee.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程总伤</span><span class="val">${agg.rangedDmg.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程</span><span class="val">${agg.rangedHits}次 · 均伤 ${avgRanged.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">击溃/击毙</span><span class="val">${agg.kills}人</span></div><div class="v-mvp-row"><span class="lab">大威风</span><span class="val">${agg.retreatTriggers}次</span></div></div>`;
+  } else {
+    mvpEl.style.display = 'none';
+  }
+
+  const rankEl = document.getElementById('rankDisplay');
+  const allStats = Object.values(charAgg);
+  const sideLabel = s => s === 'player' ? '<span class="v-rank-side p">己</span>' : '<span class="v-rank-side a">敌</span>';
+
+  function expandableSection(title, allItems, expandId, renderItem) {
+    if (!allItems.length) return `<div class="v-rank-section"><div class="v-rank-title">${title}</div><div style="color:#666;font-size:12px;text-align:center">无</div></div>`;
+    const top3 = allItems.slice(0, 3);
+    const rest = allItems.slice(3);
+    let html = `<div class="v-rank-section"><div class="v-rank-title"><span>${title}</span>`;
+    if (rest.length) html += `<span class="v-expand-btn" data-expand-btn="${expandId}" onclick="toggleRankExpand('${expandId}')">展开 ▾</span>`;
+    html += `</div>`;
+    top3.forEach((item, i) => html += renderItem(item, i + 1, false));
+    rest.forEach((item, i) => html += renderItem(item, i + 4, true, expandId));
+    html += `</div>`;
+    return html;
+  }
+
+  // Top row: MVP dealt/received (aggregated by char.id)
+  let topHtml = '<div class="v-rank-grid v-top-grid">';
+  if (bestCid) {
+    const agg = charAgg[bestCid];
+    const dealtAll = Object.entries(agg.damage_to).map(([cid, dmg]) => ({ char: charAgg[cid]?.char, damage: dmg })).filter(e => e.char).sort((a, b) => b.damage - a.damage);
+    const receivedAll = Object.entries(agg.damage_from).map(([cid, dmg]) => ({ char: charAgg[cid]?.char, damage: dmg })).filter(e => e.char).sort((a, b) => b.damage - a.damage);
+    topHtml += expandableSection('🗡 MVP造成伤害', dealtAll, 'mvpDealt', (item, rank, hidden, eid) =>
+      `<div class="v-rank-entry${hidden ? ' v-rank-entry-hidden' : ''}"${hidden ? ` data-expand="${eid}"` : ''}><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`
+    );
+    topHtml += expandableSection('🛡 对MVP造成伤害', receivedAll, 'mvpRecv', (item, rank, hidden, eid) =>
+      `<div class="v-rank-entry${hidden ? ' v-rank-entry-hidden' : ''}"${hidden ? ` data-expand="${eid}"` : ''}><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`
+    );
+  }
+  topHtml += '</div>';
 
   // Bottom row: general rankings (3 columns)
+  const allKills = allStats.filter(i => i.kills > 0).sort((a, b) => b.kills - a.kills);
+  const allMelee = allStats.filter(i => i.meleeDmg > 0).sort((a, b) => b.meleeDmg - a.meleeDmg);
+  const allRanged = allStats.filter(i => i.rangedDmg > 0).sort((a, b) => b.rangedDmg - a.rangedDmg);
   let bottomHtml = '<div class="v-rank-grid v-bottom-grid">';
-  bottomHtml+='<div class="v-rank-section"><div class="v-rank-title">⚔ 击溃/击毙 TOP3</div>';
-  if (killsTop.length) killsTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'人','kills'));
-  else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
-  bottomHtml+='</div>';
-  bottomHtml+='<div class="v-rank-section"><div class="v-rank-title">🗡 近战伤害 TOP3</div>';
-  if (meleeTop.length) meleeTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'','meleeDmg','meleeHitDetails'));
-  else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
-  bottomHtml+='</div>';
-  bottomHtml+='<div class="v-rank-section"><div class="v-rank-title">🏹 远程伤害 TOP3</div>';
-  if (rangedTop.length) rangedTop.forEach((item,i)=>bottomHtml+=entryHTML(item,i+1,'','rangedDmg','rangedHitDetails'));
-  else bottomHtml+='<div style="color:#666;font-size:12px;text-align:center">无</div>';
-  bottomHtml+='</div>';
-  bottomHtml+='</div>';
+  const entryContent = (item, rank, valLabel, valKey) => {
+    const v = valKey ? item[valKey] : item;
+    const hits = valKey === 'meleeDmg' ? item.meleeHits : valKey === 'rangedDmg' ? item.rangedHits : 0;
+    const avg = hits > 0 ? (v / hits).toFixed(1) : '';
+    return `<span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span>${sideLabel(item.side)}<span class="v-rank-val">${typeof v === 'number' ? v.toLocaleString() : v}${valLabel}</span>${avg ? `<div class="v-rank-hits">均伤 ${avg}</div>` : ''}`;
+  };
+  bottomHtml += expandableSection('⚔ 击溃/击毙', allKills, 'kills', (item, rank, hidden, eid) =>
+    `<div class="v-rank-entry${hidden ? ' v-rank-entry-hidden' : ''}"${hidden ? ` data-expand="${eid}"` : ''}>${entryContent(item, rank, '人', 'kills')}</div>`
+  );
+  bottomHtml += expandableSection('🗡 近战伤害', allMelee, 'melee', (item, rank, hidden, eid) =>
+    `<div class="v-rank-entry${hidden ? ' v-rank-entry-hidden' : ''}"${hidden ? ` data-expand="${eid}"` : ''}>${entryContent(item, rank, '', 'meleeDmg')}</div>`
+  );
+  bottomHtml += expandableSection('🏹 远程伤害', allRanged, 'ranged', (item, rank, hidden, eid) =>
+    `<div class="v-rank-entry${hidden ? ' v-rank-entry-hidden' : ''}"${hidden ? ` data-expand="${eid}"` : ''}>${entryContent(item, rank, '', 'rangedDmg')}</div>`
+  );
+  bottomHtml += '</div>';
 
   rankEl.innerHTML = topHtml + bottomHtml;
-  ov.className='show';
+  ov.className = 'show';
 }
 
 function totalTroops(side) {
@@ -1074,6 +1033,7 @@ function autoPickCard() {
 
 async function endPlacement() {
   if (gamePhase !== 'place_player') return;
+  MusicManager.play('battle');
   try {
     const data = await api.endTurn(gameId);
     applyStateFromServer(data);
@@ -1113,6 +1073,7 @@ async function runAutoPlay() {
       applyStateFromServer(data.state || data);
       data = data.state || data;
       if (data.game_phase === 'place_player' || data.gamePhase === 'place_player') {
+        MusicManager.play('battle');
         data = await api.endTurn(gameId);
         applyStateFromServer(data.state || data);
       }
@@ -1443,14 +1404,16 @@ function openSettings() {
   bg.className = 'main-menu-bg';
   bg.style.backgroundImage = `url(posters/${n}.webp)`;
   document.getElementById('mainMenu').insertBefore(bg, document.getElementById('mainMenu').firstChild);
-  // Start menu music on first user interaction (browsers block autoplay)
-  const startMusic = () => {
+  // Attempt autoplay (may be blocked by browser policy)
+  MusicManager.play('menu');
+  // Fallback: unlock audio on first user interaction
+  const unlockAudio = () => {
     MusicManager.play('menu');
-    document.removeEventListener('click', startMusic);
-    document.removeEventListener('touchstart', startMusic);
+    document.removeEventListener('click', unlockAudio);
+    document.removeEventListener('touchstart', unlockAudio);
   };
-  document.addEventListener('click', startMusic, { once: true });
-  document.addEventListener('touchstart', startMusic, { once: true });
+  document.addEventListener('click', unlockAudio, { once: true });
+  document.addEventListener('touchstart', unlockAudio, { once: true });
 })();
 
 async function startSinglePlayer() {

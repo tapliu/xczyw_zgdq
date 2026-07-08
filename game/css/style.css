@@ -19,7 +19,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#0a0a18;colo
 .menu-btn.quit:hover{border-color:#ef5350;color:#ef5350;background:rgba(239,83,80,.15);box-shadow:0 8px 25px rgba(239,83,80,0.15)}
 .menu-footer{position:fixed;bottom:24px;right:24px;font-size:15px;color:#ccc;letter-spacing:1px;padding:10px 18px;background:rgba(255,255,255,.06);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1);border-radius:10px;z-index:100}
 .menu-footer .version-badge{display:inline-block;font-size:12px;color:#e94560;background:rgba(233,69,96,.2);padding:1px 8px;border-radius:4px;margin-left:6px;letter-spacing:0;font-weight:600}
-header{background:linear-gradient(135deg,#16213e,#0f3460);padding:8px 50px 8px 16px;display:flex;align-items:center;gap:10px;border-bottom:2px solid #e94560;flex-wrap:wrap}
+header{background:linear-gradient(135deg,#16213e,#0f3460);padding:8px 60px 8px 16px;display:flex;align-items:center;gap:10px;border-bottom:2px solid #e94560;flex-wrap:wrap}
 header .terrain-select{display:flex;gap:3px;margin-left:8px}
 header .terrain-select .btn{padding:2px 6px;font-size:10px}
 header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webkit-background-clip:text;-webkit-text-fill-color:transparent;white-space:nowrap}
@@ -232,7 +232,7 @@ header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webk
 @media(max-width:700px){#victoryOverlay .v-top-grid,#victoryOverlay .v-bottom-grid{grid-template-columns:1fr}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes vBounce{0%{transform:scale(.3);opacity:0}50%{transform:scale(1.1)}70%{transform:scale(.95)}100%{transform:scale(1);opacity:1}}
-.troop-summary{display:flex;justify-content:space-between;align-items:center;padding:3px 50px 3px 8px;font-size:12px;background:rgba(0,0,0,.3);border-radius:4px;margin-bottom:4px}
+.troop-summary{display:flex;justify-content:space-between;align-items:center;padding:3px 60px 3px 8px;font-size:12px;background:rgba(0,0,0,.3);border-radius:4px;margin-bottom:4px}
 .troop-summary .total-player{color:#4fc3f7}
 .troop-summary .total-ai{color:#ef5350}
 .troop-summary b{font-size:14px}
@@ -242,7 +242,7 @@ header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webk
 .editor-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:rgba(10,10,24,.95)}
 .editor-overlay.show{display:block}
 .editor-screen{height:100%;display:flex;flex-direction:column;padding:10px}
-.editor-hdr{display:flex;justify-content:space-between;align-items:center;padding:4px 50px 8px 8px;border-bottom:1px solid #1a1a3e;flex-shrink:0}
+.editor-hdr{display:flex;justify-content:space-between;align-items:center;padding:4px 60px 8px 8px;border-bottom:1px solid #1a1a3e;flex-shrink:0}
 .editor-hdr h2{font-size:16px;color:#f5a623}
 .editor-hdr-btns{display:flex;gap:6px}
 .pick-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}

@@ -151,6 +151,13 @@ function applyStateFromServer(data) {
   if (gamePhase === 'gameover') {
     setTimeout(() => showVictory(s.winner), 500);
     if (autoPlay) toggleAutoPlay();
+    MusicManager.play(s.winner ? 'victory' : 'defeat');
+  } else if (gamePhase === 'draw' || gamePhase === 'pick_card') {
+    MusicManager.play('draw');
+  } else if (gamePhase === 'place_ai') {
+    MusicManager.play('battle');
+  } else if (gamePhase === 'idle' || gamePhase === 'place_player') {
+    MusicManager.play('place');
   }
 }
 
@@ -1160,6 +1167,7 @@ function backToMenu() {
   document.getElementById('mainMenu').style.display = 'flex';
   document.getElementById('gameHeader').style.display = 'none';
   document.getElementById('gameContent').style.display = 'none';
+  MusicManager.play('menu');
 }
 
 async function setTerrain(mode) {
@@ -1400,6 +1408,12 @@ async function resetAllEdits() {
   }
 }
 
+function toggleMusic() {
+  const enabled = MusicManager.toggle();
+  const btn = document.getElementById('btnMusicToggle');
+  if (btn) btn.textContent = enabled ? '♪ BGM' : '♪ BGM OFF';
+}
+
 // Random poster background on load
 (function initMenuBg() {
   const n = Math.floor(Math.random() * 3) + 1;
@@ -1407,6 +1421,7 @@ async function resetAllEdits() {
   bg.className = 'main-menu-bg';
   bg.style.backgroundImage = `url(posters/${n}.webp)`;
   document.getElementById('mainMenu').insertBefore(bg, document.getElementById('mainMenu').firstChild);
+  MusicManager.play('menu');
 })();
 
 async function startSinglePlayer() {

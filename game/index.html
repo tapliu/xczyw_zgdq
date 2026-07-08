@@ -36,6 +36,7 @@
 <button class="btn btn-xs btn-outline active" id="btnTerrainNormal" onclick="setTerrain('normal')">普通</button>
 <button class="btn btn-xs btn-outline" id="btnTerrainNagashino" onclick="setTerrain('nagashino')">长篠</button>
 <button class="btn btn-xs btn-outline" id="btnTerrainTennozan" onclick="setTerrain('tennozan')">天王山</button>
+<button class="btn btn-xs btn-outline" id="btnMusicToggle" onclick="toggleMusic()" style="margin-left:auto">♪ BGM</button>
 </div>
 <div class="header-info">
 <span class="stat">回合 <b class="round-display" id="roundDisplay">0</b></span>
@@ -124,6 +125,7 @@
 
 <div id="victoryOverlay"><div class="v-box"><div class="v-icon" id="vIcon"></div><div class="v-title" id="vTitle"></div><div class="v-sub" id="vSub"></div><div class="v-body"><div class="v-left"><div id="mvpDisplay" style="display:none"></div></div><div class="v-right"><div id="rankDisplay" class="v-rankings"></div></div></div><button class="v-btn" onclick="location.reload()">再来一局</button></div></div>
 
+<script src="js/music.js"></script>
 <script src="js/api.js"></script>
 <script src="js/main.js?v=3"></script>
 <script>

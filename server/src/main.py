@@ -34,13 +34,13 @@ app.add_middleware(
 
 app.include_router(game_router, prefix="/api")
 
-static_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'game')
-if os.path.isdir(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
-
 music_dir = os.path.join(os.path.dirname(__file__), 'data', 'music')
 if os.path.isdir(music_dir):
     app.mount("/music", StaticFiles(directory=music_dir), name="music")
+
+static_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'game')
+if os.path.isdir(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
 
 if __name__ == "__main__":
     uvicorn.run("server.src.main:app", host="127.0.0.1", port=8000, reload=True)

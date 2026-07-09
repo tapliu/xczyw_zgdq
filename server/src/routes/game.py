@@ -49,19 +49,10 @@ def get_game(game_id: str):
     return game.to_dict()
 
 
-@router.post('/game/{game_id}/draw')
-def draw_phase(game_id: str):
-    game = get_game_or_404(game_id)
-    if game.game_phase not in ('idle', 'draw'):
-        raise HTTPException(status_code=400, detail='抽卡阶段才能抽卡')
-    game.draw_phase()
-    return {'state': game.to_dict()}
-
-
 @router.post('/game/{game_id}/draw-options')
 def draw_options(game_id: str):
     game = get_game_or_404(game_id)
-    if game.game_phase not in ('idle', 'draw', 'pick_card'):
+    if game.game_phase not in ('idle', 'draw', 'pick_card', 'multiplayer_draw_host', 'multiplayer_pick_host'):
         raise HTTPException(status_code=400, detail='抽卡阶段才能抽卡')
     try:
         game.draw_options()
@@ -70,10 +61,60 @@ def draw_options(game_id: str):
     return {'state': game.to_dict(), 'options': game._pending_draw_options or []}
 
 
+@router.post('/game/{game_id}/draw-options-guest')
+def draw_options_guest(game_id: str):
+    game = get_game_or_404(game_id)
+    if game.game_phase not in ('multiplayer_draw_guest', 'multiplayer_pick_guest'):
+        raise HTTPException(status_code=400, detail='不在对手抽卡阶段')
+    try:
+        game.draw_options_guest()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'state': game.to_dict(), 'options': game._pending_draw_options or []}
+
+
+@router.post('/game/{game_id}/pick-card-guest')
+def pick_card_guest(game_id: str, body: PickCardRequest):
+    game = get_game_or_404(game_id)
+    if game.game_phase != 'multiplayer_pick_guest':
+        raise HTTPException(status_code=400, detail='不在对手选卡阶段')
+    try:
+        game.pick_card_guest(body.char_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'state': game.to_dict()}
+
+
+@router.post('/game/{game_id}/place-guest')
+def place_guest(game_id: str, body: PlaceRequest):
+    game = get_game_or_404(game_id)
+    if game.game_phase != 'place_guest':
+        raise HTTPException(status_code=400, detail='不在对手放置阶段')
+    try:
+        game.place_unit_guest(body.char_id, body.cell, body.troops)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/end-placement-guest')
+def end_placement_guest(game_id: str):
+    game = get_game_or_404(game_id)
+    if game.game_phase != 'place_guest':
+        raise HTTPException(status_code=400, detail='不在对手放置阶段')
+    try:
+        game.end_placement_guest()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'{type(e).__name__}: {e}')
+    return game.to_dict()
+
+
 @router.post('/game/{game_id}/pick-card')
 def pick_card(game_id: str, body: PickCardRequest):
     game = get_game_or_404(game_id)
-    if game.game_phase != 'pick_card':
+    if game.game_phase not in ('pick_card', 'multiplayer_pick_host'):
         raise HTTPException(status_code=400, detail='不在选卡阶段')
     try:
         game.pick_card(body.char_id)

@@ -12,15 +12,11 @@ BOARD_COLS = 8
 PLAYER_ROWS = [4, 5, 6, 7]
 AI_ROWS = [0, 1, 2, 3]
 PLACE_PER_ROUND = 5
-DRAW_PER_ROUND = 2
-INIT_DRAW = 10
-FLAG_DRAW = 3
-REGULAR_DRAW = 7
 INIT_TROOPS = 50000
 MAX_TROOPS_PER_UNIT = 10000
 TROOP_INCOME = 10000
 MAX_TOTAL_TROOPS = 300000
-SPECTATOR_COUNT = 4
+MAX_DRAW_PER_SIDE = 30
 
 def _make_tennozan():
     m = [False] * 64
@@ -87,6 +83,7 @@ class SideState:
         self.flag_generals = []
         self.locked_flag_ids = []
         self.current_flag_char_id = None
+        self.total_draws = 0
 
     def to_dict(self):
         return {
@@ -98,6 +95,7 @@ class SideState:
             'flag_generals': self.flag_generals,
             'locked_flag_ids': self.locked_flag_ids,
             'current_flag_char_id': self.current_flag_char_id,
+            'total_draws': self.total_draws,
         }
 
 
@@ -126,6 +124,9 @@ class GameState:
         self._pending_draw_options = None
         self.pending_picks = 0
         self.pending_flag_picks = 0
+        self.multiplayer = False
+        self._draw_seq = []
+        self._draw_seq_idx = 0
 
     def _log(self, msg, typ='info'):
         self.battle_log.append({'msg': msg, 'type': typ})
@@ -455,15 +456,15 @@ class GameState:
                         cg_copy['lord_name'] = lord
                 self._apply_type_bonus(cg_copy)
                 all_game_chars.append(cg_copy)
-        self.draw_pile = [deepcopy(c) for c in all_game_chars]
-        shuffle(self.draw_pile)
+        self.draw_pile = []
+        self.spectator_pool = [deepcopy(c) for c in all_game_chars]
+        shuffle(self.spectator_pool)
         self.player = SideState()
         self.ai = SideState()
         self.round = 0
         self.game_phase = 'idle'
         self.placed_this_turn = 0
         self.dead_list = []
-        self.spectator_pool = []
         self.combat_stats = {}
         self.player_cooldowns = []
         self.ai_cooldowns = []
@@ -477,15 +478,201 @@ class GameState:
         self._pending_draw_options = None
         self.pending_picks = 0
         self.pending_flag_picks = 0
-        self._log('点击「抽卡」开始初始抽卡（先抽3名旗本，再抽7名武将）', 'info')
+        self._init_draw_sequence()
+        self._log('初始抽卡：先选旗本武将，再选普通武将', 'info')
 
-    def draw_phase(self):
+    # ---- Unified draw sequence (single-player & multiplayer) ----
+    def _init_draw_sequence(self):
+        """Generate the draw sequence for the current round."""
+        self._draw_seq = []
+        self._draw_seq_idx = 0
+        # Check if both sides have reached the draw limit
+        if self.player.total_draws >= MAX_DRAW_PER_SIDE and self.ai.total_draws >= MAX_DRAW_PER_SIDE:
+            if self.game_phase in ('draw', 'pick_card', 'multiplayer_draw_host', 'multiplayer_pick_host'):
+                self.game_phase = 'place_player'
+            return
+        if self.round == 0:
+            if self.multiplayer:
+                slot_a, slot_b = 'host', 'guest'
+            else:
+                slot_a, slot_b = 'player', 'ai'
+            self._draw_seq = [
+                (slot_a, 1, 'flag'),
+                (slot_b, 2, 'flag'),
+                (slot_a, 2, 'flag'),
+                (slot_b, 1, 'flag'),
+                (slot_b, 1, 'regular'),
+                (slot_a, 2, 'regular'),
+                (slot_b, 2, 'regular'),
+                (slot_a, 2, 'regular'),
+                (slot_b, 2, 'regular'),
+                (slot_a, 2, 'regular'),
+                (slot_b, 2, 'regular'),
+                (slot_a, 1, 'regular'),
+            ]
+        elif self.multiplayer:
+            starter = 'host' if self.round % 2 == 1 else 'guest'
+            other = 'guest' if starter == 'host' else 'host'
+            self._draw_seq = [(starter, 1, 'regular'), (other, 2, 'regular'), (starter, 1, 'regular')]
+        else:
+            starter = 'player' if self.round % 2 == 1 else 'ai'
+            other = 'ai' if starter == 'player' else 'player'
+            self._draw_seq = [(starter, 1, 'regular'), (other, 2, 'regular'), (starter, 1, 'regular')]
+        self._draw_seq_idx = 0
+        while not self.multiplayer and self._draw_seq_idx < len(self._draw_seq) and self._draw_seq[self._draw_seq_idx][0] == 'ai':
+            _, count, card_type = self._draw_seq[self._draw_seq_idx]
+            self._perform_ai_draw(count, card_type)
+            self._draw_seq_idx += 1
+        if self._draw_seq_idx >= len(self._draw_seq):
+            self._finish_draw_sequence()
+            return
+        self._apply_draw_step()
+        first_side = self._draw_seq[self._draw_seq_idx][0]
+        self._set_phase_for_side(first_side)
+
+    def _apply_draw_step(self):
+        """Set pending_picks/pending_flag_picks from current step."""
+        if self._draw_seq_idx >= len(self._draw_seq):
+            return
+        _, count, card_type = self._draw_seq[self._draw_seq_idx]
+        self.pending_picks = count
+        self.pending_flag_picks = count if card_type == 'flag' else 0
+
+    def _advance_draw_sequence(self):
+        """Move to next step. Returns (side, count, card_type) or None if done."""
+        self._draw_seq_idx += 1
+        if self._draw_seq_idx >= len(self._draw_seq):
+            return None
+        side, count, card_type = self._draw_seq[self._draw_seq_idx]
+        self.pending_picks = count
+        self.pending_flag_picks = count if card_type == 'flag' else 0
+        return side, count, card_type
+
+    def _perform_ai_draw(self, count, card_type):
+        """Draw `count` cards for AI from spectator_pool."""
+        if card_type == 'flag':
+            daimyo = [c for c in self.spectator_pool if c.get('identity') == '大名']
+            to_pick = daimyo[:count]
+            picked_ids = {c['id'] for c in to_pick}
+            self.spectator_pool = [c for c in self.spectator_pool if c['id'] not in picked_ids]
+            for c in to_pick:
+                self.ai.flag_generals.append(deepcopy(c))
+                self.ai.collection.append(c)
+                self.ai.total_draws += 1
+            if to_pick:
+                self._log(f'电脑选择了旗本 {to_pick[0]["name"]}', 'info')
+        else:
+            to_pick = self.spectator_pool[:count]
+            self.spectator_pool = self.spectator_pool[count:]
+            for c in to_pick:
+                self.ai.collection.append(c)
+                self.ai.total_draws += 1
+            if to_pick:
+                self._log(f'电脑选择了{"、".join(c["name"] for c in to_pick)}', 'info')
+
+    def _auto_draw_player(self, count, card_type):
+        """Auto-draw `count` cards for the player from spectator_pool (no UI)."""
+        if card_type == 'flag':
+            daimyo = [c for c in self.spectator_pool if c.get('identity') == '大名']
+            to_pick = daimyo[:count]
+            picked_ids = {c['id'] for c in to_pick}
+            self.spectator_pool = [c for c in self.spectator_pool if c['id'] not in picked_ids]
+            for c in to_pick:
+                self.player.flag_generals.append(deepcopy(c))
+                self.player.collection.append(c)
+                self.player.total_draws += 1
+            if to_pick:
+                self._log(f'自动选择旗本 {to_pick[0]["name"]}', 'info')
+        else:
+            to_pick = self.spectator_pool[:count]
+            self.spectator_pool = self.spectator_pool[count:]
+            for c in to_pick:
+                self.player.collection.append(c)
+                self.player.total_draws += 1
+            if to_pick:
+                self._log(f'自动选择{"、".join(c["name"] for c in to_pick)}', 'info')
+
+
+    def _handle_step_complete(self):
+        """Called when the current human-side drawing step is complete. Advances or finishes."""
+        next_step = self._advance_draw_sequence()
+        if next_step is None:
+            self._finish_draw_sequence()
+            return
+        # Process consecutive AI steps in single-player
+        while not self.multiplayer and next_step[0] == 'ai':
+            self._perform_ai_draw(next_step[1], next_step[2])
+            next_step = self._advance_draw_sequence()
+            if next_step is None:
+                self._finish_draw_sequence()
+                return
+        side = next_step[0]
+        self._set_phase_for_side(side)
+
+    def _set_phase_for_side(self, side):
+        """Set game_phase based on who should draw next."""
+        if side in ('player', 'host'):
+            if self.multiplayer:
+                self.game_phase = 'multiplayer_draw_host'
+                self._log('等待房主抽卡', 'info')
+            else:
+                self.game_phase = 'draw'
+                self._log('请抽卡', 'info')
+        elif side in ('ai', 'guest'):
+            if self.multiplayer:
+                self.game_phase = 'multiplayer_draw_guest'
+                self._log('等待对手抽卡', 'info')
+            else:
+                # Single-player AI draws are handled by _auto_draw_ai_step
+                self._log('电脑自动抽卡', 'info')
+
+    def _finish_draw_sequence(self):
+        """Transition from draw phase to placement."""
+        if self.round == 0:
+            self.round = 1
+            self.placed_this_turn = 0
+            pi = self._decay_income(self.player)
+            a_inc = self._decay_income(self.ai)
+            self.player.troops += pi
+            self.ai.troops += a_inc
+            self.game_phase = 'place_player'
+            self._log(f'第1回合 · 各获{pi}/{a_inc}兵力，请部署', 'info')
+        else:
+            self.round += 1
+            self.placed_this_turn = 0
+            pi = a_inc = 0
+            if self.round > 1:
+                pi = self._decay_income(self.player)
+                a_inc = self._decay_income(self.ai)
+                self.player.troops += pi
+                self.ai.troops += a_inc
+            self.game_phase = 'place_player'
+            income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
+            self._log(f'第{self.round}回合 · 抽牌完成{income_str}，请部署', 'info')
+
+    # ---- Draw options (human side: player / host) ----
+    def draw_options(self):
         self._expire_cooldowns()
-        if self.game_phase not in ('idle', 'draw'):
+        if self.game_phase not in ('idle', 'draw', 'pick_card', 'multiplayer_draw_host', 'multiplayer_pick_host'):
             raise ValueError('不在抽卡阶段')
-        self.pending_picks = 0
-        count = DRAW_PER_ROUND
-        if len(self.draw_pile) <= 0:
+        # Reinitialize sequence for new rounds (after battle ends with phase='draw')
+        if self._draw_seq_idx >= len(self._draw_seq):
+            self._init_draw_sequence()
+            # After cap is reached, _init_draw_sequence transitions phase to place_player.
+            # Return gracefully with no options.
+            if self.game_phase not in ('draw', 'pick_card', 'multiplayer_draw_host', 'multiplayer_pick_host'):
+                self._pending_draw_options = None
+                return
+        if self._draw_seq_idx >= len(self._draw_seq):
+            raise ValueError('抽卡序列已完成')
+        side, count, card_type = self._draw_seq[self._draw_seq_idx]
+        if side not in ('player', 'host'):
+            raise ValueError('不是你的抽卡回合')
+        # pending_picks / pending_flag_picks already set by _apply_draw_step
+        if self.pending_picks <= 0 and card_type != 'flag':
+            self.pending_picks = count
+        if len(self.spectator_pool) <= 0:
+            self.pending_picks = 0
             self.round += 1
             self.placed_this_turn = 0
             pi = a_inc = 0
@@ -498,83 +685,35 @@ class GameState:
             income_str = f'（各获{pi}/{a_inc}兵力）' if self.round > 1 else ''
             self._log(f'第{self.round}回合 · 牌堆已空，直接放置{income_str}', 'info')
             return
-
-        actual = min(count, len(self.draw_pile))
-        pc = self.draw_pile[:actual]
-        self.draw_pile = self.draw_pile[actual:]
-        for c in pc:
-            self.player.collection.append(c)
-
-        ac = min(actual, len(self.draw_pile))
-        ac_arr = self.draw_pile[:ac]
-        self.draw_pile = self.draw_pile[ac:]
-        for c in ac_arr:
-            self.ai.collection.append(c)
-
-        if self.round > 0 and len(self.draw_pile) > 0:
-            spec_count = min(SPECTATOR_COUNT, len(self.draw_pile))
-            spec_arr = self.draw_pile[:spec_count]
-            self.draw_pile = self.draw_pile[spec_count:]
-            for c in spec_arr:
-                self.spectator_pool.append(c)
-            self._log(f'观战席新增{len(spec_arr)}名武将：{"、".join(c["name"] for c in spec_arr)}', 'info')
-            self._try_recruit_ai()
-
-        self.round += 1
-        self.placed_this_turn = 0
-
-        pi = a_inc = 0
-        if self.round > 1:
-            pi = self._decay_income(self.player)
-            a_inc = self._decay_income(self.ai)
-            self.player.troops += pi
-            self.ai.troops += a_inc
-
-        self.game_phase = 'place_player'
-        income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
-        self._log(f'第{self.round}回合 · 抽{len(pc)}张，敌方抽{len(ac_arr)}张{income_str}', 'info')
-
-    def draw_options(self):
-        self._expire_cooldowns()
-        if self.game_phase not in ('idle', 'draw', 'pick_card'):
-            raise ValueError('不在抽卡阶段')
-        if self.pending_picks <= 0:
-            if self.round == 0:
-                self.pending_picks = INIT_DRAW
-                self.pending_flag_picks = FLAG_DRAW
-            else:
-                self.pending_picks = DRAW_PER_ROUND
-        if len(self.draw_pile) <= 0:
-            self.pending_picks = 0
-            self.draw_phase()
-            return
         if self.pending_flag_picks > 0:
-            # Flag picks: only offer 大名 characters
-            daimyo = [c for c in self.draw_pile if c.get('identity') == '大名']
-            options_count = min(3, len(daimyo))
-            opts = daimyo[:options_count]
+            daimyo = [c for c in self.spectator_pool if c.get('identity') == '大名']
+            opts_count = min(3, len(daimyo))
+            opts = daimyo[:opts_count]
             self._pending_draw_options = opts
-            # Remove picked daimyo from draw pile
             picked_ids = {c['id'] for c in opts}
-            self.draw_pile = [c for c in self.draw_pile if c['id'] not in picked_ids]
+            self.spectator_pool = [c for c in self.spectator_pool if c['id'] not in picked_ids]
         else:
-            options_count = min(3, len(self.draw_pile))
-            opts = self.draw_pile[:options_count]
-            self.draw_pile = self.draw_pile[options_count:]
+            opts_count = min(3, len(self.spectator_pool))
+            opts = self.spectator_pool[:opts_count]
+            self.spectator_pool = self.spectator_pool[opts_count:]
             self._pending_draw_options = opts
-        self.game_phase = 'pick_card'
+        if self.multiplayer:
+            self.game_phase = 'multiplayer_pick_host'
+        else:
+            self.game_phase = 'pick_card'
 
     def pick_card(self, char_id):
-        if self.game_phase != 'pick_card':
+        if self.game_phase not in ('pick_card', 'multiplayer_pick_host'):
             raise ValueError('不在选卡阶段')
         opts = self._pending_draw_options or []
         selected = next((c for c in opts if c['id'] == char_id), None)
         if not selected:
             raise ValueError('无效选择')
         self._pending_draw_options = None
+        side, _, _ = self._draw_seq[self._draw_seq_idx]
+        assert side in ('player', 'host'), f'pick_card called but current side is {side}'
         self.player.collection.append(selected)
-        is_flag = self.pending_flag_picks > 0
-        if is_flag:
+        if self.pending_flag_picks > 0:
             if selected.get('identity') != '大名':
                 raise ValueError('旗本武将只能选择大名身份武将')
             self.player.flag_generals.append(deepcopy(selected))
@@ -583,71 +722,15 @@ class GameState:
         else:
             self._log(f'选择了 {selected["name"]}', 'win')
         unchosen = [c for c in opts if c['id'] != char_id]
-        self.draw_pile.extend(unchosen)
+        self.spectator_pool.extend(unchosen)
+        self.player.total_draws += 1
         self.pending_picks -= 1
         if self.pending_picks > 0:
             flag_hint = f'旗本{self.pending_flag_picks}名，' if self.pending_flag_picks > 0 else ''
-            self.game_phase = 'pick_card'
+            self.game_phase = 'multiplayer_pick_host' if self.multiplayer else 'pick_card'
             self._log(f'还需选择{flag_hint}{self.pending_picks}张', 'info')
             return
-        if self.round == 0:
-            self._log('初始抽卡完成', 'info')
-            # AI gets 3 flag generals (only 大名)
-            ai_daimyo = [c for c in self.draw_pile if c.get('identity') == '大名']
-            ai_flag_count = min(FLAG_DRAW, len(ai_daimyo))
-            af_arr = ai_daimyo[:ai_flag_count]
-            af_ids = {c['id'] for c in af_arr}
-            self.draw_pile = [c for c in self.draw_pile if c['id'] not in af_ids]
-            for c in af_arr:
-                self.ai.flag_generals.append(deepcopy(c))
-                self.ai.collection.append(c)
-            # AI gets 7 regular generals
-            ai_reg_count = min(REGULAR_DRAW, len(self.draw_pile))
-            ac_arr = self.draw_pile[:ai_reg_count]
-            self.draw_pile = self.draw_pile[ai_reg_count:]
-            for c in ac_arr:
-                self.ai.collection.append(c)
-            if len(self.draw_pile) > 0:
-                spec_count = min(SPECTATOR_COUNT, len(self.draw_pile))
-                spec_arr = self.draw_pile[:spec_count]
-                self.draw_pile = self.draw_pile[spec_count:]
-                for c in spec_arr:
-                    self.spectator_pool.append(c)
-                self._log(f'观战席新增{len(spec_arr)}名武将：{"、".join(c["name"] for c in spec_arr)}', 'info')
-                self._try_recruit_ai()
-            self.round = 1
-            self.placed_this_turn = 0
-            pi = self._decay_income(self.player)
-            a_inc = self._decay_income(self.ai)
-            self.player.troops += pi
-            self.ai.troops += a_inc
-            self.game_phase = 'place_player'
-            self._log(f'第1回合 · 各获{pi}/{a_inc}兵力', 'info')
-        else:
-            ai_count = min(DRAW_PER_ROUND, len(self.draw_pile))
-            ac_arr = self.draw_pile[:ai_count]
-            self.draw_pile = self.draw_pile[ai_count:]
-            for c in ac_arr:
-                self.ai.collection.append(c)
-            if len(self.draw_pile) > 0:
-                spec_count = min(SPECTATOR_COUNT, len(self.draw_pile))
-                spec_arr = self.draw_pile[:spec_count]
-                self.draw_pile = self.draw_pile[spec_count:]
-                for c in spec_arr:
-                    self.spectator_pool.append(c)
-                self._log(f'观战席新增{len(spec_arr)}名武将：{"、".join(c["name"] for c in spec_arr)}', 'info')
-                self._try_recruit_ai()
-            self.round += 1
-            self.placed_this_turn = 0
-            pi = a_inc = 0
-            if self.round > 1:
-                pi = self._decay_income(self.player)
-                a_inc = self._decay_income(self.ai)
-                self.player.troops += pi
-                self.ai.troops += a_inc
-            self.game_phase = 'place_player'
-            income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
-            self._log(f'第{self.round}回合 · 选{len(ac_arr)}张，敌方抽{len(ac_arr)}张{income_str}', 'info')
+        self._handle_step_complete()
 
     def place_unit(self, char_id, cell, troops):
         if self.game_phase != 'place_player':
@@ -715,7 +798,6 @@ class GameState:
             unlocked = [fg for fg in self.player.flag_generals if fg['id'] not in self.player.locked_flag_ids]
             has_flag_unit = any(u and u.char['id'] == self.player.current_flag_char_id for u in self.player.board if u)
             if unlocked and not has_flag_unit and self.player.current_flag_char_id is not None:
-                # flag general was on board but died this turn; don't reassign
                 self.player.flag_idx = -1
             elif unlocked and not has_flag_unit:
                 self.player.flag_idx = -1
@@ -724,9 +806,178 @@ class GameState:
                 if not any(u for u in self.player.board if u):
                     raise ValueError('请至少放置一名武将')
 
-        self.game_phase = 'place_ai'
-        self._ai_placement()
+        if self.multiplayer:
+            self.game_phase = 'place_guest'
+            self._log('等待对手放置', 'info')
+        else:
+            self.game_phase = 'place_ai'
+            self._ai_placement()
+            self._end_ai_place()
+
+    # ---- Multiplayer guest methods ----
+    def draw_options_guest(self):
+        """Guest draws cards (in multiplayer mode only)."""
+        self._expire_cooldowns()
+        if self.game_phase not in ('multiplayer_draw_guest', 'multiplayer_pick_guest'):
+            raise ValueError('不在抽卡阶段')
+        if self._draw_seq_idx >= len(self._draw_seq):
+            self._init_draw_sequence()
+            if self.game_phase not in ('multiplayer_draw_guest', 'multiplayer_pick_guest'):
+                self._pending_draw_options = None
+                return
+        if self._draw_seq_idx >= len(self._draw_seq):
+            raise ValueError('抽卡序列已完成')
+        side, count, card_type = self._draw_seq[self._draw_seq_idx]
+        if side != 'guest':
+            raise ValueError('不是对手的抽卡回合')
+        if self.pending_picks <= 0 and card_type != 'flag':
+            self.pending_picks = count
+        if len(self.spectator_pool) <= 0:
+            self.pending_picks = 0
+            self._finish_draw_sequence()
+            return
+        if self.pending_flag_picks > 0:
+            daimyo = [c for c in self.spectator_pool if c.get('identity') == '大名']
+            opts_count = min(3, len(daimyo))
+            opts = daimyo[:opts_count]
+            self._pending_draw_options = opts
+            picked_ids = {c['id'] for c in opts}
+            self.spectator_pool = [c for c in self.spectator_pool if c['id'] not in picked_ids]
+        else:
+            opts_count = min(3, len(self.spectator_pool))
+            opts = self.spectator_pool[:opts_count]
+            self.spectator_pool = self.spectator_pool[opts_count:]
+            self._pending_draw_options = opts
+        self.game_phase = 'multiplayer_pick_guest'
+
+    def pick_card_guest(self, char_id):
+        if self.game_phase != 'multiplayer_pick_guest':
+            raise ValueError('不在选卡阶段')
+        opts = self._pending_draw_options or []
+        selected = next((c for c in opts if c['id'] == char_id), None)
+        if not selected:
+            raise ValueError('无效选择')
+        self._pending_draw_options = None
+        side, _, _ = self._draw_seq[self._draw_seq_idx]
+        assert side == 'guest', f'pick_card_guest called but current side is {side}'
+        self.ai.collection.append(selected)
+        if self.pending_flag_picks > 0:
+            if selected.get('identity') != '大名':
+                raise ValueError('旗本武将只能选择大名身份武将')
+            self.ai.flag_generals.append(deepcopy(selected))
+            self.pending_flag_picks -= 1
+            self._log(f'对手选择了旗本 {selected["name"]}（剩余{self.pending_flag_picks}名旗本待选）', 'info')
+        else:
+            self._log(f'对手选择了 {selected["name"]}', 'info')
+        unchosen = [c for c in opts if c['id'] != char_id]
+        self.spectator_pool.extend(unchosen)
+        self.ai.total_draws += 1
+        self.pending_picks -= 1
+        if self.pending_picks > 0:
+            flag_hint = f'旗本{self.pending_flag_picks}名，' if self.pending_flag_picks > 0 else ''
+            self.game_phase = 'multiplayer_pick_guest'
+            self._log(f'对手还需选择{flag_hint}{self.pending_picks}张', 'info')
+            return
+        # Step complete → advance
+        next_step = self._advance_draw_sequence()
+        if next_step is None:
+            self._finish_draw_sequence()
+            return
+        next_side, _, _ = next_step
+        if next_side == 'guest':
+            # More guest draws (shouldn't happen in current patterns but handle gracefully)
+            self.draw_options_guest()
+            return
+        self._set_phase_for_side(next_side)
+
+    def place_unit_guest(self, char_id, cell, troops):
+        """Player 2 places a unit on the ai side."""
+        if self.game_phase != 'place_guest':
+            raise ValueError('不在对手放置阶段')
+        if self.placed_this_turn >= PLACE_PER_ROUND:
+            raise ValueError('本回合放置次数已用完')
+        if not (0 <= cell < 64):
+            raise ValueError('无效格子')
+        if cell // 8 not in AI_ROWS:
+            raise ValueError('只能在己方区域放置')
+        if not self._is_active_cell(cell):
+            raise ValueError('此格不可用')
+        if self.player.board[cell] or self.ai.board[cell]:
+            raise ValueError('此格已有单位')
+        if self._is_behind_enemy_line(cell, False):
+            raise ValueError('不可放置在敌方棋子后方')
+        if self.round > 1 and self._is_in_front_of_friendly(cell, False):
+            raise ValueError('不可放置在友军前方')
+        char = next((c for c in self.ai.collection if c['id'] == char_id), None)
+        if not char:
+            raise ValueError('武将不在卡组中')
+        if any(u and u.char['id'] == char_id for u in self.ai.board if u):
+            raise ValueError('该武将已在棋盘上')
+        if any(u and u.char['id'] == char_id for u in self.player.board if u):
+            raise ValueError('对方已有该武将')
+        if troops > self.ai.troops:
+            raise ValueError('兵力不足')
+        if troops > min(MAX_TROOPS_PER_UNIT, char['leadership'] * 100):
+            raise ValueError('兵力超出上限')
+
+        if self.ai.flag_idx == -1:
+            unlocked_flags = [fg for fg in self.ai.flag_generals if fg['id'] not in self.ai.locked_flag_ids]
+            if unlocked_flags:
+                is_flag_gen = any(fg['id'] == char_id for fg in unlocked_flags)
+                if not is_flag_gen:
+                    raise ValueError('旗本不在场上，必须先放置旗本武将')
+
+        self.unit_id_counter += 1
+        uid = self.unit_id_counter
+        unit = Unit(char, troops, uid)
+        self.ai.board[cell] = unit
+        self.ai.troops -= troops
+        self.placed_this_turn += 1
+        self.uid_char_map[uid] = deepcopy(char)
+        self.uid_side_map[uid] = 'ai'
+
+        if self.ai.flag_idx == -1:
+            unlocked_flags = [fg for fg in self.ai.flag_generals if fg['id'] not in self.ai.locked_flag_ids]
+            for fg in unlocked_flags:
+                if fg['id'] == char_id:
+                    self.ai.flag_idx = cell
+                    self.ai.current_flag_char_id = char_id
+                    self._log(f'对手旗帜部署至 {cell}', 'flag')
+                    break
+
+        if self._is_adjacent_to_enemy(cell, False):
+            self._pin_unit(cell, False)
+            self._log(f'对手 {char["name"]} 部署至 {cell}（与敌方邻接，被钉住）', 'info')
+        else:
+            self._log(f'对手 {char["name"]} 部署至 {cell}', 'info')
+
+    def end_placement_guest(self):
+        """Player 2 (guest) ends their placement phase, triggering battle."""
+        if self.game_phase != 'place_guest':
+            raise ValueError('不在放置阶段')
+        if not any(self.ai.board[i] and self.ai.flag_idx == i for i in range(64) if self.ai.board[i]):
+            unlocked = [fg for fg in self.ai.flag_generals if fg['id'] not in self.ai.locked_flag_ids]
+            has_flag_unit = any(u and u.char['id'] == self.ai.current_flag_char_id for u in self.ai.board if u)
+            if unlocked and not has_flag_unit and self.ai.current_flag_char_id is not None:
+                self.ai.flag_idx = -1
+            elif unlocked and not has_flag_unit:
+                self.ai.flag_idx = -1
+                self._log('对手尚未放置旗本，旗手位置空缺', 'info')
+            else:
+                if not any(u for u in self.ai.board if u):
+                    raise ValueError('请至少放置一名武将')
+
         self._end_ai_place()
+
+    def _is_adjacent_to_enemy(self, cell, is_player):
+        for ni in self._get_neighbor_indices(cell):
+            if is_player:
+                if self.ai.board[ni]:
+                    return True
+            else:
+                if self.player.board[ni]:
+                    return True
+        return False
 
     def _auto_place_side(self, side, collection, rows, is_player, max_place=None):
         if max_place is None:
@@ -1497,12 +1748,12 @@ class GameState:
                 self.winner = False
                 self._log('💀 达阵！敌方大胜！' + (f'（{p_troops} vs {a_troops}）' if p_td else ''), 'lose')
                 return
-        if len(self.draw_pile) == 0 and not p_any and a_any:
+        if len(self.spectator_pool) == 0 and not p_any and a_any:
             self.game_phase = 'gameover'
             self.winner = False
             self._log('💀 我方覆灭', 'lose')
             return
-        if len(self.draw_pile) == 0 and p_any and not a_any:
+        if len(self.spectator_pool) == 0 and p_any and not a_any:
             self.game_phase = 'gameover'
             self.winner = True
             self._log('🎉 敌方覆灭', 'win')
@@ -1518,9 +1769,22 @@ class GameState:
             self._log('🎉 敌方旗手溃散3次，我方胜利！', 'win')
             return
 
-        self.game_phase = 'draw'
-        self.placed_this_turn = 0
-        self._log(f'第{self.round}回合结束 · 点击「抽卡」继续', 'info')
+        if self.player.total_draws >= MAX_DRAW_PER_SIDE and self.ai.total_draws >= MAX_DRAW_PER_SIDE:
+            self.round += 1
+            self.placed_this_turn = 0
+            pi = a_inc = 0
+            if self.round > 1:
+                pi = self._decay_income(self.player)
+                a_inc = self._decay_income(self.ai)
+                self.player.troops += pi
+                self.ai.troops += a_inc
+            self.game_phase = 'place_player'
+            income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
+            self._log(f'第{self.round}回合 · 抽牌封顶{income_str}，请部署', 'info')
+        else:
+            self.game_phase = 'draw'
+            self.placed_this_turn = 0
+            self._log(f'第{self.round}回合结束 · 请抽卡', 'info')
 
     def set_terrain(self, mode):
         if mode not in ('normal', 'nagashino', 'tennozan'):
@@ -1544,7 +1808,7 @@ class GameState:
             'placed_this_turn': self.placed_this_turn,
             'player': self.player.to_dict(),
             'ai': self.ai.to_dict(),
-            'draw_pile_count': len(self.draw_pile),
+            'draw_pile_count': len(self.spectator_pool),
             'flag_scatter_count': dict(self.flag_scatter_count),
             'dead_list': list(self.dead_list),
             'spectator_pool': self.spectator_pool,
@@ -1558,4 +1822,6 @@ class GameState:
             'winner': self.winner,
             'unit_id_counter': self.unit_id_counter,
             'pending_flag_picks': self.pending_flag_picks,
+            'multiplayer': self.multiplayer,
+            'pending_draw_options': self._pending_draw_options,
         }

@@ -15,7 +15,7 @@
   <div class="settings-screen">
     <div class="settings-hdr"><h2>⚙ 游戏设置</h2><button class="btn btn-outline btn-small" onclick="closeSettings()">关闭</button></div>
     <div class="settings-body">
-      <div class="settings-row"><span class="settings-label">背景音乐</span><button class="btn btn-small btn-outline" id="settingsMusicToggle" onclick="toggleMusic()">♪ 关闭</button></div>
+      <div class="settings-row"><span class="settings-label">背景音乐</span><button class="btn btn-small btn-outline" id="settingsMusicToggle" onclick="toggleMusic()">♪ 关闭</button><button class="btn btn-small btn-outline" onclick="nextMusic()" style="margin-left:6px">下一首</button></div>
       <div class="settings-row"><span class="settings-label">音量</span><input type="range" id="settingsVolume" min="0" max="100" value="40" oninput="setMusicVolume(this.value)"><span class="settings-val" id="settingsVolDisplay">40</span></div>
     </div>
   </div>
@@ -28,7 +28,7 @@
     <div class="menu-subtitle">— 兵者，诡道也 —</div>
     <div class="menu-buttons" id="menuButtons">
       <button class="menu-btn single" onclick="startSinglePlayer()"><span class="menu-icon">⚔</span> 单人模式</button>
-      <button class="menu-btn" onclick="menuPlaceholder('多人模式')"><span class="menu-icon">👥</span> 多人模式</button>
+      <button class="menu-btn" onclick="openMultiplayer()"><span class="menu-icon">👥</span> 多人模式</button>
       <button class="menu-btn" onclick="openEditor()"><span class="menu-icon">📜</span> 武将编辑</button>
       <button class="menu-btn" onclick="menuPlaceholder('游戏设置')"><span class="menu-icon">⚙</span> 游戏设置</button>
       <button class="menu-btn quit" onclick="quitGame()"><span class="menu-icon">🚪</span> 退出游戏</button>
@@ -64,8 +64,9 @@
 <div class="troop-summary"><span class="total-player">🔵 总兵力 <b id="playerTotalTroops">50000</b></span><span class="flag-scatter p" id="pFlagScatter">🚩溃散 0/3</span><span class="placement-count" id="placementCount">已放 0/5</span><span class="flag-scatter a" id="aFlagScatter">🚩溃散 0/3</span><span class="total-ai">🔴 总兵力 <b id="aiTotalTroops">50000</b></span></div>
 <div class="board" id="board"><div class="divider"></div></div>
 <div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap">
-<button class="btn btn-gold" id="btnDraw" onclick="drawPhase()">抽卡</button>
-<button class="btn btn-small" id="btnAutoPlace" onclick="toggleAutoPlay()">托管</button>
+<button class="btn btn-gold" id="btnDraw" onclick="drawPhase()" style="display:none">抽卡</button>
+<button class="btn btn-small" id="btnAutoOneRound" onclick="autoPlayOneRound()">托管一回合</button>
+<button class="btn btn-small" id="btnAutoPerm" onclick="toggleAutoPlay()">一键托管</button>
 <button class="btn btn-outline btn-small" id="btnEndTurn" onclick="endPlacement()">结束放置</button>
 <button class="btn btn-outline btn-small" onclick="restartGame()" style="border-color:#555;color:#999">重新开始</button>
 <button class="btn btn-outline btn-small" onclick="backToMenu()" style="margin-left:auto;border-color:#555;color:#999">返回主菜单</button>
@@ -114,7 +115,7 @@
 
 <div class="troop-modal" id="pickModal">
 <div class="modal" style="max-width:700px">
-<div class="pick-hdr"><h2>选择一张武将牌</h2><button class="btn btn-small" id="pickQuickBtn" onclick="quickDrawPhase()" style="background:#f5a623;color:#111;border:none;font-weight:700">一键抽取</button><button class="btn btn-outline btn-small" id="pickAutoBtn" onclick="autoPickCard()">自动选择</button></div>
+<div class="pick-hdr"><h2>选择一张武将牌</h2><span id="mpDrawTimer" style="font-size:14px;color:#e94560;font-weight:700;display:none"></span><button class="btn btn-small" id="pickQuickBtn" onclick="quickDrawPhase()" style="background:#f5a623;color:#111;border:none;font-weight:700">一键抽取</button><button class="btn btn-outline btn-small" id="pickAutoBtn" onclick="autoPickCard()">自动选择</button></div>
 <div class="pick-grid" id="pickGrid"></div>
 </div>
 </div>
@@ -134,6 +135,8 @@
 </div>
 </div>
 </div>
+
+<div id="customGenModal" class="troop-modal"><div class="modal" style="max-width:400px;text-align:center;padding:24px"><h2 style="margin-bottom:12px">🎴 自建武将</h2><p style="color:#aaa;margin-bottom:20px;font-size:13px">本局对战是否加入自建武将？</p><div style="display:flex;gap:12px;justify-content:center"><button class="btn btn-gold" id="cgmYes">加入</button><button class="btn btn-outline" id="cgmNo">不加入</button></div></div></div>
 
 <div id="victoryOverlay"><div class="v-box"><div class="v-icon" id="vIcon"></div><div class="v-title" id="vTitle"></div><div class="v-sub" id="vSub"></div><div class="v-body"><div class="v-left"><div id="mvpDisplay" style="display:none"></div></div><div class="v-right"><div id="rankDisplay" class="v-rankings"></div></div></div><button class="v-btn" onclick="location.reload()">再来一局</button></div></div>
 
@@ -175,7 +178,63 @@
         <button class="btn btn-outline btn-small" onclick="closeCharEditor()">返回</button>
       </div>
     </div>
+    <div class="sort-bar" id="editorSortBar">
+      <button class="sort-btn active" data-sort="id">编号</button>
+      <button class="sort-btn" data-sort="name">姓名</button>
+      <button class="sort-btn" data-sort="leadership">统率</button>
+      <button class="sort-btn" data-sort="martial">武力</button>
+      <button class="sort-btn" data-sort="intelligence">智力</button>
+      <button class="sort-btn" data-sort="politics">政治</button>
+      <button class="sort-btn" data-sort="faction">所属势力</button>
+    </div>
     <div class="editor-grid" id="editorGrid"></div>
+  </div>
+</div>
+
+<!-- 多人模式 - 房间列表 -->
+<div class="editor-overlay" id="roomOverlay">
+  <div class="editor-screen" style="max-width:560px">
+    <div class="editor-hdr">
+      <h2>👥 多人对战</h2>
+      <div class="editor-hdr-btns">
+        <button class="btn btn-outline btn-small" onclick="closeMultiplayer()">返回</button>
+      </div>
+    </div>
+    <div class="room-body" style="padding:12px">
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn btn-gold" onclick="createRoom()">＋ 创建房间</button>
+        <button class="btn btn-outline btn-small" onclick="refreshRoomList()">刷新</button>
+      </div>
+      <div id="roomList"><div style="text-align:center;padding:24px;color:#888">加载中...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 多人模式 - 房间大厅 -->
+<div class="editor-overlay" id="lobbyOverlay">
+  <div class="editor-screen" style="max-width:480px">
+    <div class="editor-hdr">
+      <h2>🏠 房间大厅</h2>
+      <div class="editor-hdr-btns">
+        <button class="btn btn-outline btn-small" id="lobbyLeaveBtn" onclick="leaveRoom()">离开</button>
+      </div>
+    </div>
+    <div class="lobby-body" style="padding:16px;text-align:center">
+      <div style="font-size:14px;margin-bottom:12px;color:#aaa">房间号</div>
+      <div style="font-size:28px;font-weight:700;letter-spacing:4px;color:#f5a623;margin-bottom:16px" id="lobbyRoomId">------</div>
+      <div style="display:flex;justify-content:center;gap:32px;margin-bottom:12px">
+        <div><div style="font-size:13px;color:#888">房主</div><div style="font-size:24px;margin-top:4px" id="lobbyHostIcon">🟢</div><div style="font-size:11px;color:#555" id="lobbyHostLabel">你</div><div style="font-size:11px;margin-top:2px" id="lobbyHostReady">未准备</div></div>
+        <div><div style="font-size:13px;color:#888">对手</div><div style="font-size:24px;margin-top:4px" id="lobbyGuestIcon">⏳</div><div style="font-size:11px;color:#555" id="lobbyGuestLabel">等待中...</div><div style="font-size:11px;margin-top:2px" id="lobbyGuestReady"></div></div>
+      </div>
+      <div id="lobbyCgStatus" style="font-size:12px;color:#888;margin-bottom:8px"></div>
+      <div id="lobbyCgCards" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
+        <button class="btn btn-outline" id="lobbyReadyBtn" onclick="toggleReady()" style="display:none;border-color:#4fc3f7;color:#4fc3f7">准备</button>
+        <button class="btn btn-gold" id="lobbyStartBtn" onclick="startRoomGame()" style="display:none">开始游戏</button>
+      </div>
+      <div id="lobbyCountdown" style="font-size:36px;font-weight:700;color:#e94560;margin:12px 0;display:none">5</div>
+      <div id="lobbyWaiting" style="color:#888;font-size:13px;margin-top:8px">等待对手加入...</div>
+    </div>
   </div>
 </div>
 
@@ -217,10 +276,26 @@
             <option>大名</option>
           </select>
         </div>
-        <div class="cg-field"><span class="cg-label">统</span><input class="cg-input cg-stat" id="cgLead" type="number" min="1" max="100" value="50"></div>
-        <div class="cg-field"><span class="cg-label">武</span><input class="cg-input cg-stat" id="cgMar" type="number" min="1" max="100" value="50"></div>
-        <div class="cg-field"><span class="cg-label">智</span><input class="cg-input cg-stat" id="cgInt" type="number" min="1" max="100" value="50"></div>
-        <div class="cg-field"><span class="cg-label">政</span><input class="cg-input cg-stat" id="cgPol" type="number" min="1" max="100" value="50"></div>
+        <div class="cg-field cg-field-stat">
+          <span class="cg-label">统</span>
+          <div class="cg-stat-bar" id="cgBarLead"><div class="cg-stat-fill" style="width:50%;background:#e94560"></div></div>
+          <input class="cg-input cg-stat" id="cgLead" type="number" min="1" max="100" value="50">
+        </div>
+        <div class="cg-field cg-field-stat">
+          <span class="cg-label">武</span>
+          <div class="cg-stat-bar" id="cgBarMar"><div class="cg-stat-fill" style="width:50%;background:#f5a623"></div></div>
+          <input class="cg-input cg-stat" id="cgMar" type="number" min="1" max="100" value="50">
+        </div>
+        <div class="cg-field cg-field-stat">
+          <span class="cg-label">智</span>
+          <div class="cg-stat-bar" id="cgBarInt"><div class="cg-stat-fill" style="width:50%;background:#2ecc71"></div></div>
+          <input class="cg-input cg-stat" id="cgInt" type="number" min="1" max="100" value="50">
+        </div>
+        <div class="cg-field cg-field-stat">
+          <span class="cg-label">政</span>
+          <div class="cg-stat-bar" id="cgBarPol"><div class="cg-stat-fill" style="width:50%;background:#3498db"></div></div>
+          <input class="cg-input cg-stat" id="cgPol" type="number" min="1" max="100" value="50">
+        </div>
         <div class="cg-total" id="cgTotal">总分 200</div>
         <div class="cg-prev" id="cgPreview"></div>
       </div>

@@ -6,9 +6,11 @@ const MusicManager = {
   _battleIndex: -1,
 
   _tracks: {
-    menu: { src: '/music/bgm_menu_01.m4a', loop: true },
-    draw: { src: '/music/bgm_menu_02.m4a', loop: true },
-    place: { src: '/music/bgm_place_01.m4a', loop: true },
+    ambient: [
+      { src: '/music/bgm_menu_01.m4a' },
+      { src: '/music/bgm_menu_02.m4a' },
+      { src: '/music/bgm_place_01.m4a' },
+    ],
     battle: [
       { src: '/music/bgm_battle_01.m4a' },
       { src: '/music/bgm_battle_02.m4a' },
@@ -17,18 +19,19 @@ const MusicManager = {
       { src: '/music/bgm_battle_05.m4a' },
       { src: '/music/bgm_battle_06.m4a' },
     ],
-    victory: { src: '/music/bgm_battle_04.m4a', loop: false },
-    defeat: { src: '/music/bgm_menu_02.m4a', loop: false },
+    victory: { src: '/music/bgm_battle_04.m4a' },
+    defeat: { src: '/music/bgm_menu_02.m4a' },
   },
+  _ambientIndex: -1,
+  _battleIndex: -1,
 
-  _nextBattle() {
-    const list = this._tracks.battle;
+  _nextIndex(list, currentIndex) {
+    if (!list.length) return -1;
     let idx;
     do {
       idx = Math.floor(Math.random() * list.length);
-    } while (idx === this._battleIndex && list.length > 1);
-    this._battleIndex = idx;
-    return list[idx];
+    } while (idx === currentIndex && list.length > 1);
+    return idx;
   },
 
   play(scene) {
@@ -36,10 +39,22 @@ const MusicManager = {
     this._scene = scene;
     if (!this._enabled) { return; }
 
-    const track = scene === 'battle' ? this._nextBattle() : this._tracks[scene];
+    let track;
+    if (scene === 'battle') {
+      const idx = this._nextIndex(this._tracks.battle, this._battleIndex);
+      this._battleIndex = idx;
+      track = this._tracks.battle[idx];
+    } else if (scene === 'victory' || scene === 'defeat') {
+      track = this._tracks[scene];
+    } else {
+      // menu / draw / place - ambient rotation
+      const idx = this._nextIndex(this._tracks.ambient, this._ambientIndex);
+      this._ambientIndex = idx;
+      track = this._tracks.ambient[idx];
+    }
     if (!track) return;
 
-    this._audio.loop = track.loop !== false;
+    this._audio.loop = false;
     this._audio.volume = this._volume;
     const absSrc = track.src.startsWith('/') ? new URL(track.src, location.origin).href : track.src;
     if (this._audio.src !== absSrc) {
@@ -50,10 +65,28 @@ const MusicManager = {
     }
   },
 
+  next() {
+    if (this._scene === 'victory' || this._scene === 'defeat') return;
+    const isBattle = this._scene === 'battle';
+    const list = isBattle ? this._tracks.battle : this._tracks.ambient;
+    if (!list.length) return;
+    let idx;
+    do {
+      idx = Math.floor(Math.random() * list.length);
+    } while (idx === (isBattle ? this._battleIndex : this._ambientIndex) && list.length > 1);
+    if (isBattle) this._battleIndex = idx;
+    else this._ambientIndex = idx;
+    const track = list[idx];
+    if (!track) return;
+    this._audio.src = track.src.startsWith('/') ? new URL(track.src, location.origin).href : track.src;
+    this._audio.play().catch(e => console.warn('Music play error:', e));
+  },
+
   stop() {
     this._audio.pause();
     this._audio.currentTime = 0;
     this._battleIndex = -1;
+    this._ambientIndex = -1;
   },
 
   setVolume(v) {
@@ -76,6 +109,7 @@ const MusicManager = {
 
   _onEnded() {
     if (this._scene === 'battle') this.play('battle');
+    else if (this._scene !== 'victory' && this._scene !== 'defeat') this.play(this._scene);
   },
 };
 

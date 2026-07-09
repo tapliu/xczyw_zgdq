@@ -78,10 +78,11 @@ let round = 0, gamePhase = 'idle', drawPileCount = 100, placedThisTurn = 0;
 let player = { collection: [], board: Array(64).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
 let ai = { collection: [], board: Array(64).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
 let selectedChar = null, selectedCell = null;
-let playerCatFilter = 'all', aiCatFilter = 'all', playerSortBy = 'default';
+let playerCatFilter = 'all', aiCatFilter = 'all', playerSortBy = 'default', editorSortBy = 'id';
 let avatarCache = {};
 let playerCooldowns = [], aiCooldowns = [];
 let autoPlay = false;
+let _isAutoPlaying = false;
 let quickDrawMode = false;
 let scatterDebuff = {}, deadList = [], flagScatterCount = { player: 0, ai: 0 };
 let spectatorPool = [];
@@ -148,36 +149,70 @@ function applyStateFromServer(data) {
   updateUI();
   updateSpectatorGrid();
   updateButtonStates();
+  const pendingOpts = s.pending_draw_options;
+  if (pendingOpts && pendingOpts.length && gamePhase === 'pick_card') {
+    pendingOpts.forEach(c => {
+      if (c.orig_leadership !== undefined) {
+        c.leadership = c.orig_leadership; c.martial = c.orig_martial;
+        c.intelligence = c.orig_intelligence; c.politics = c.orig_politics;
+      }
+    });
+    showPickModal(pendingOpts);
+  }
   if (gamePhase === 'gameover') {
     setTimeout(() => showVictory(s.winner), 500);
     if (autoPlay) toggleAutoPlay();
     MusicManager.play(s.winner ? 'victory' : 'defeat');
   } else if (gamePhase === 'draw' || gamePhase === 'pick_card') {
-    MusicManager.play('draw');
-  } else if (gamePhase === 'place_ai') {
-    MusicManager.play('battle');
-  } else if (gamePhase === 'idle' || gamePhase === 'place_player') {
-    MusicManager.play('place');
+    if (!mpGameId && gamePhase === 'draw') setTimeout(() => { if (gamePhase==='draw' && !_isAutoPlaying) drawPhase(); }, 100);
+  } else if (gamePhase === 'place_player' && !mpGameId) {
+    setPhase('🏯 放置你的部队');
+  }
+  const isMyPick =
+    (gamePhase === 'pick_card' && !mpGameId) ||
+    (gamePhase === 'multiplayer_pick_host' && mpIsHost) ||
+    (gamePhase === 'multiplayer_pick_guest' && !mpIsHost);
+  if (!isMyPick) {
+    document.getElementById('pickModal').classList.remove('show');
+    clearDrawTimer();
   }
 }
 
 function updateButtonStates() {
+  if (mpGameId) {
+    const btnDraw = document.getElementById('btnDraw');
+    const btnEnd = document.getElementById('btnEndTurn');
+    document.getElementById('btnAutoOneRound').disabled = true;
+    document.getElementById('btnAutoPerm').disabled = true;
+    if (gamePhase === 'gameover') {
+      btnDraw.disabled = btnEnd.disabled = true;
+    } else if (mpIsHost) {
+      btnDraw.disabled = gamePhase !== 'multiplayer_draw_host' && gamePhase !== 'multiplayer_pick_host' && gamePhase !== 'idle';
+      btnEnd.disabled = gamePhase !== 'place_player';
+    } else {
+      btnDraw.disabled = gamePhase !== 'multiplayer_draw_guest' && gamePhase !== 'multiplayer_pick_guest';
+      btnEnd.disabled = gamePhase !== 'place_guest';
+    }
+    return;
+  }
   if (gamePhase === 'gameover') {
     document.getElementById('btnDraw').disabled = true;
     document.getElementById('btnEndTurn').disabled = true;
-    document.getElementById('btnAutoPlace').disabled = true;
-  } else if (gamePhase === 'idle' || gamePhase === 'draw') {
-    document.getElementById('btnDraw').disabled = false;
+    document.getElementById('btnAutoOneRound').disabled = true;
+    document.getElementById('btnAutoPerm').disabled = true;
+  } else if (gamePhase === 'idle' || gamePhase === 'draw' || gamePhase === 'pick_card') {
     document.getElementById('btnEndTurn').disabled = false;
-    document.getElementById('btnAutoPlace').disabled = false;
+    document.getElementById('btnAutoOneRound').disabled = false;
+    document.getElementById('btnAutoPerm').disabled = false;
   } else if (gamePhase === 'place_player') {
-    document.getElementById('btnDraw').disabled = true;
     document.getElementById('btnEndTurn').disabled = false;
-    document.getElementById('btnAutoPlace').disabled = false;
+    document.getElementById('btnAutoOneRound').disabled = false;
+    document.getElementById('btnAutoPerm').disabled = false;
   } else {
     document.getElementById('btnDraw').disabled = true;
     document.getElementById('btnEndTurn').disabled = true;
-    document.getElementById('btnAutoPlace').disabled = true;
+    document.getElementById('btnAutoOneRound').disabled = true;
+    document.getElementById('btnAutoPerm').disabled = true;
   }
 }
 
@@ -238,6 +273,10 @@ function rowOf(i){return Math.floor(i/BOARD_COLS)}
 function colOf(i){return i%BOARD_COLS}
 function inRange(r,c){return r>=0&&r<BOARD_ROWS&&c>=0&&c<BOARD_COLS}
 function isActiveCell(i) { return TERRAIN_PATTERNS[terrainMode][i]; }
+function isGuestView() { return !!(mpGameId && !mpIsHost); }
+// Map server cell index ↔ local display index (guest sees 180° rotation)
+function localCell(i) { return isGuestView() ? (63 - i) : i; }
+function serverCell(i) { return isGuestView() ? (63 - i) : i; }
 
 function initBoard() {
   const el = document.getElementById('board');
@@ -252,35 +291,40 @@ function initBoard() {
   }
 }
 
-function getUnit(idx) { return player.board[idx] || ai.board[idx]; }
-function isPlayerUnit(idx) { return player.board[idx] !== null; }
+function getUnit(idx) { const d = localCell(idx); return player.board[d] || ai.board[d]; }
+function isPlayerUnit(idx) { const d = localCell(idx); return isGuestView() ? !!ai.board[d] : !!player.board[d]; }
 
 function renderBoardFull() {
   const cells = document.querySelectorAll('.cell');
   cells.forEach((cell, i) => {
-    cell.className = 'cell ' + (rowOf(i) < 4 ? 'ai-zone' : 'player-zone');
-    if (!isActiveCell(i)) cell.classList.add('inactive');
-    const pu = player.board[i], au = ai.board[i];
+    const di = localCell(i);
+    const origRow = rowOf(di);
+    cell.className = 'cell ' + (isGuestView()
+      ? (origRow < 4 ? 'player-zone' : 'ai-zone')
+      : (origRow < 4 ? 'ai-zone' : 'player-zone'));
+    if (!isActiveCell(di)) cell.classList.add('inactive');
+    const pu = player.board[di], au = ai.board[di];
     const u = pu || au;
     if (u) {
-      const isPlayer = !!pu;
+      const isPlayer = isGuestView() ? !!au : !!pu;
       const both = !!(pu && au);
       cell.classList.add(isPlayer ? 'has-player' : 'has-ai');
       if (both) cell.classList.add('has-both');
       if (selectedCell === i) cell.classList.add('highlight');
       if (both) {
-        const pFlag = player.flagIdx === i, aFlag = ai.flagIdx === i;
+        const pFlag = isGuestView() ? (ai.flagIdx === di) : (player.flagIdx === di);
+        const aFlag = isGuestView() ? (player.flagIdx === di) : (ai.flagIdx === di);
         if (pFlag||aFlag) cell.classList.add('flag-cell');
-        const pPower = Math.round(calcPower(i, true)), aPower2 = Math.round(calcPower(i, false));
+        const pPower = Math.round(calcPower(di, true)), aPower2 = Math.round(calcPower(di, false));
         const pfBadges = getFactions(pu.char).map(f => `<span class="bu-faction-badge player-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
         const afBadges = getFactions(au.char).map(f => `<span class="bu-faction-badge ai-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
         cell.innerHTML = `${pfBadges}${afBadges}<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,18)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?flagIcon('#ffd700'):''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?flagIcon('#4caf50'):''}${generateAvatar(au.char,18)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
       } else {
-        const isFlag = (isPlayer && player.flagIdx === i) || (!isPlayer && ai.flagIdx === i);
+        const isFlag = (isPlayer && (isGuestView() ? ai.flagIdx === di : player.flagIdx === di)) || (!isPlayer && (isGuestView() ? player.flagIdx === di : ai.flagIdx === di));
         if (isFlag) cell.classList.add('flag-cell');
         const flagIconSvg = isFlag ? `<span class="u-flag-abs">${flagIcon(isPlayer ? '#ffd700' : '#4caf50')}</span>` : '';
         const dirIcon = isPlayer ? '▲' : '▼';
-        const power = Math.round(calcPower(i, isPlayer));
+        const power = Math.round(calcPower(di, isPlayer));
         const fBadges = getFactions(u.char).map(f => `<span class="u-faction-badge" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
         cell.innerHTML = `${fBadges}${flagIconSvg}<img class="u-avatar" src="${generateAvatar(u.char,24)}" alt="">
           <span class="u-name">${u.char.name}</span>
@@ -297,17 +341,21 @@ function renderBoardFull() {
     const el=document.querySelector(`.cell[data-index="${a.idx}"]`);
     if (el) el.classList.add(a.type);
   });
-  document.getElementById('playerTroops').textContent = player.troops ? player.troops.toLocaleString() : '0';
-  document.getElementById('aiTroops').textContent = ai.troops ? ai.troops.toLocaleString() : '0';
+  document.getElementById('playerTroops').textContent = (isGuestView() ? ai.troops : player.troops) ? (isGuestView() ? ai.troops : player.troops).toLocaleString() : '0';
+  document.getElementById('aiTroops').textContent = (isGuestView() ? player.troops : ai.troops) ? (isGuestView() ? player.troops : ai.troops).toLocaleString() : '0';
 }
 
 function onCellClick(index) {
+  const di = localCell(index);
   const u = getUnit(index);
   if (!u) {
-    if (gamePhase === 'place_player' && placedThisTurn < PLACE_PER_ROUND && PLAYER_ROWS.includes(rowOf(index))) {
-      if (!isActiveCell(index)) { setPhase('❌ 此格不可用'); return; }
-      if (player.board.filter(u=>u).length >= maxUnits()) { setPhase('❌ 已达上限'+maxUnits()+'名武将'); return; }
-      if (isBehindEnemyLine(index, true)) { setPhase('❌ 不可放置在敌方棋子后方'); return; }
+    const canPlace = isGuestView()
+      ? (gamePhase === 'place_guest' && placedThisTurn < PLACE_PER_ROUND && AI_ROWS.includes(rowOf(di)))
+      : (gamePhase === 'place_player' && placedThisTurn < PLACE_PER_ROUND && PLAYER_ROWS.includes(rowOf(di)));
+    if (canPlace) {
+      if (!isActiveCell(di)) { setPhase('❌ 此格不可用'); return; }
+      if ((isGuestView() ? ai.board.filter(u=>u).length : player.board.filter(u=>u).length) >= maxUnits()) { setPhase('❌ 已达上限'+maxUnits()+'名武将'); return; }
+      if (isBehindEnemyLine(di, !isGuestView())) { setPhase('❌ 不可放置在敌方棋子后方'); return; }
       if (selectedChar) { selectedCell = index; showTroopModal(selectedChar, index); }
       else setPhase('请在下方武将册中选择一名武将');
     }
@@ -410,8 +458,9 @@ function showDetailUnit(u, isPlayer, idx) {
   panel.className = 'detail-panel show';
   const char = u.char;
   const rc = RATING_COLORS[char.rating] || '#888';
-  const isFlag = (isPlayer && player.flagIdx === idx) || (!isPlayer && ai.flagIdx === idx);
-  const power = Math.round(calcPower(idx, isPlayer));
+  const di = localCell(idx);
+  const isFlag = (isPlayer && (isGuestView() ? ai.flagIdx : player.flagIdx) === di) || (!isPlayer && (isGuestView() ? player.flagIdx : ai.flagIdx) === di);
+  const power = Math.round(calcPower(di, isPlayer));
   panel.innerHTML = `
     <div class="d-top">
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
@@ -479,7 +528,8 @@ let pendingChar = null, pendingCell = -1;
 
 function showTroopModal(char, cellIdx) {
   pendingChar = char; pendingCell = cellIdx;
-  const maxT = Math.min(MAX_TROOPS_PER_UNIT, char.leadership * 100, player.troops || INIT_TROOPS);
+  const myTroops = isGuestView() ? (ai.troops || INIT_TROOPS) : (player.troops || INIT_TROOPS);
+  const maxT = Math.min(MAX_TROOPS_PER_UNIT, char.leadership * 100, myTroops);
   document.getElementById('tmName').textContent = char.name;
   document.getElementById('tmSub').textContent = `统率 ${char.leadership} · 最大 ${Math.min(MAX_TROOPS_PER_UNIT, char.leadership*100)}`;
   const slider = document.getElementById('troopSlider');
@@ -495,27 +545,40 @@ function updateTroopDisplay() {
 
 async function confirmPlace() {
   if (!pendingChar||pendingCell<0) return;
+  const serverIdx = serverCell(pendingCell);
+  const isPlayerSide = isGuestView() ? false : true;
+  const myBoard = isGuestView() ? ai.board : player.board;
+  const myFlagGens = isGuestView() ? ai.flagGenerals : player.flagGenerals;
+  const myLockedFlags = isGuestView() ? ai.lockedFlagIds : player.lockedFlagIds;
+  const myCurrentFlagId = isGuestView() ? ai.currentFlagCharId : player.currentFlagCharId;
+  const myTroops = isGuestView() ? ai.troops : player.troops;
   const troops = parseInt(document.getElementById('troopSlider').value);
-  if (troops > (player.troops || 0)) { addBattleLog('兵力不足！','lose'); return; }
+  if (troops > (myTroops || 0)) { addBattleLog('兵力不足！','lose'); return; }
   if (getUnit(pendingCell)) { cancelPlace(); return; }
-  if (!isActiveCell(pendingCell)) { addBattleLog('此格不可用！','lose'); cancelPlace(); return; }
-  if (player.board.some(u=>u&&u.char.id===pendingChar.id) || ai.board.some(u=>u&&u.char.id===pendingChar.id)) {
+  if (!isActiveCell(serverIdx)) { addBattleLog('此格不可用！','lose'); cancelPlace(); return; }
+  if (myBoard.some(u=>u&&u.char.id===pendingChar.id) || (isGuestView() ? player.board : ai.board).some(u=>u&&u.char.id===pendingChar.id)) {
     addBattleLog('该武将已在棋盘上！','lose'); cancelPlace(); return;
   }
-  if (isBehindEnemyLine(pendingCell, true)) {
+  if (isBehindEnemyLine(serverIdx, isPlayerSide)) {
     addBattleLog('不可放置在敌方棋子后方！','lose'); cancelPlace(); return;
   }
-  const isFlagGen = player.flagGenerals.some(fg => fg.id === pendingChar.id);
-  if (isFlagGen && player.lockedFlagIds.includes(pendingChar.id)) {
+  const isFlagGen = myFlagGens.some(fg => fg.id === pendingChar.id);
+  if (isFlagGen && myLockedFlags.includes(pendingChar.id)) {
     addBattleLog('该旗本已被锁定，无法上场！','lose'); cancelPlace(); return;
   }
-  if (isFlagGen && player.currentFlagCharId !== null && player.currentFlagCharId !== pendingChar.id) {
+  if (isFlagGen && myCurrentFlagId !== null && myCurrentFlagId !== pendingChar.id) {
     addBattleLog('已有旗本在场上，只能同时放置一名旗本！','lose'); cancelPlace(); return;
   }
   try {
-    const data = await api.place(gameId, pendingChar.id, pendingCell, troops);
-    cancelPlace();
-    applyStateFromServer(data);
+    if (isGuestView()) {
+      const data = await api.placeGuest(mpGameId, pendingChar.id, serverIdx, troops);
+      cancelPlace();
+      applyStateFromServer(data);
+    } else {
+      const data = await api.place(gameId, pendingChar.id, serverIdx, troops);
+      cancelPlace();
+      applyStateFromServer(data);
+    }
   } catch (e) {
     addBattleLog('放置失败：' + e.message, 'lose');
     cancelPlace();
@@ -538,31 +601,35 @@ function isOnCooldown(charId, isPlayer) {
 function updateCollectionGrid() {
   const el = document.getElementById('collectionGrid');
   const empty = document.getElementById('emptyTip');
-  if (!player.collection || !player.collection.length) { el.innerHTML=''; empty.style.display='block'; return; }
+  const my = isGuestView() ? ai : player;
+  const otherBoard = isGuestView() ? player.board : ai.board;
+  const myCooldowns = isGuestView() ? aiCooldowns : playerCooldowns;
+  const myCatFilter = isGuestView() ? aiCatFilter : playerCatFilter;
+  const mySortBy = isGuestView() ? aiSortBy : playerSortBy;
+  if (!my.collection || !my.collection.length) { el.innerHTML=''; empty.style.display='block'; return; }
   empty.style.display='none';
-  let filtered = [...player.collection];
-  if (playerCatFilter !== 'all') filtered = filtered.filter(c => c.type === playerCatFilter);
-  const sortAttr = playerSortBy;
+  let filtered = [...my.collection];
+  if (myCatFilter !== 'all') filtered = filtered.filter(c => c.type === myCatFilter);
+  const sortAttr = mySortBy;
   const ratingOrder={ 'S+':0,'S':1,'A':2,'B':3,'C':4,'D':5 };
-  const hasActiveFlagOnBoard = player.currentFlagCharId !== null && player.board.some(u => u && u.char.id === player.currentFlagCharId);
+  const hasActiveFlagOnBoard = my.currentFlagCharId !== null && my.board.some(u => u && u.char.id === my.currentFlagCharId);
 
-  const isFlagGen = c => player.flagGenerals.some(fg => fg.id === c.id);
+  const isFlagGen = c => my.flagGenerals.some(fg => fg.id === c.id);
 
   filtered.sort((a,b) => {
     const aDead=isDead(a.id), bDead=isDead(b.id);
-    const aCd=isOnCooldown(a.id,true), bCd=isOnCooldown(b.id,true);
-    const aOn=player.board.some(u=>u&&u.char.id===a.id)||ai.board.some(u=>u&&u.char.id===a.id);
-    const bOn=player.board.some(u=>u&&u.char.id===b.id)||ai.board.some(u=>u&&u.char.id===b.id);
-    const aLocked=player.lockedFlagIds.includes(a.id);
-    const bLocked=player.lockedFlagIds.includes(b.id);
+    const aCd=isOnCooldown(a.id,!isGuestView()), bCd=isOnCooldown(b.id,!isGuestView());
+    const aOn=my.board.some(u=>u&&u.char.id===a.id)||otherBoard.some(u=>u&&u.char.id===a.id);
+    const bOn=my.board.some(u=>u&&u.char.id===b.id)||otherBoard.some(u=>u&&u.char.id===b.id);
+    const aLocked=my.lockedFlagIds.includes(a.id);
+    const bLocked=my.lockedFlagIds.includes(b.id);
     const aFg=isFlagGen(a);
     const bFg=isFlagGen(b);
-    const aWait=aFg && !aLocked && !(aOn && player.currentFlagCharId===a.id) && hasActiveFlagOnBoard;
-    const bWait=bFg && !bLocked && !(bOn && player.currentFlagCharId===b.id) && hasActiveFlagOnBoard;
+    const aWait=aFg && !aLocked && !(aOn && my.currentFlagCharId===a.id) && hasActiveFlagOnBoard;
+    const bWait=bFg && !bLocked && !(bOn && my.currentFlagCharId===b.id) && hasActiveFlagOnBoard;
     const aG=aLocked?5:(aDead?4:(aWait?3:(aCd?2:(aOn?1:0))));
     const bG=bLocked?5:(bDead?4:(bWait?3:(bCd?2:(bOn?1:0))));
     if (aG!==bG) return aG-bG;
-    // Flag generals before regulars in same group
     if (aFg !== bFg) return aFg ? -1 : 1;
     if (sortAttr !== 'default') {
       return (b[sortAttr]||0) - (a[sortAttr]||0);
@@ -571,27 +638,27 @@ function updateCollectionGrid() {
   });
   el.innerHTML = '';
   filtered.forEach(c => {
-    const onBoard = player.board.some(u=>u&&u.char.id===c.id);
-    const onAi = ai.board.some(u=>u&&u.char.id===c.id);
+    const onBoard = my.board.some(u=>u&&u.char.id===c.id);
+    const onOther = otherBoard.some(u=>u&&u.char.id===c.id);
     const div = document.createElement('div');
-    const onCooldown = isOnCooldown(c.id, true);
-    const cdRemaining = onCooldown ? (playerCooldowns.find(x => x.id === c.id)) : null;
+    const onCooldown = isOnCooldown(c.id, !isGuestView());
+    const cdRemaining = onCooldown ? (myCooldowns.find(x => x.id === c.id)) : null;
     const freezeRemaining = cdRemaining ? Math.max(0, (cdRemaining.round + 4) - round + 1) : 0;
     const dead = isDead(c.id);
-    const isFlagGen = player.flagGenerals.some(fg => fg.id === c.id);
-    const isLocked = player.lockedFlagIds.includes(c.id);
+    const isFlagGen = my.flagGenerals.some(fg => fg.id === c.id);
+    const isLocked = my.lockedFlagIds.includes(c.id);
     const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
-    const isCurrentFlag = player.currentFlagCharId === c.id && onBoard;
+    const isCurrentFlag = my.currentFlagCharId === c.id && onBoard;
     const isOtherFlagWaiting = isFlagGen && !isLocked && !isCurrentFlag && hasActiveFlagOnBoard;
     div.className = 'char-card';
     if (isLocked) div.classList.add('locked-flag');
     else if (dead) div.classList.add('dead');
-    else if (onBoard||onAi) div.classList.add('used');
+    else if (onBoard||onOther) div.classList.add('used');
     else if (isOtherFlagWaiting) div.classList.add('cooldown');
     else if (onCooldown) div.classList.add('cooldown');
     if (isFlagGen && !isLocked && !isOtherFlagWaiting) div.classList.add('flag-gen');
     if (selectedChar&&selectedChar.id===c.id) div.classList.add('selected');
-    const showAttr = playerSortBy !== 'default' ? `<div class="cattr">${c[playerSortBy]}</div>` : '';
+    const showAttr = mySortBy !== 'default' ? `<div class="cattr">${c[mySortBy]}</div>` : '';
     const flagBadge = isLocked ? '<div class="freeze-badge" style="background:rgba(100,0,0,0.7);color:#ef5350">🔒 已锁定</div>'
       : isCurrentFlag ? '<div class="freeze-badge" style="background:rgba(0,100,0,0.7);color:#4caf50">🚩 旗手中</div>'
       : isOtherFlagWaiting ? '<div class="freeze-badge" style="background:rgba(80,80,80,0.7);color:#999">⏳ 旗本在场</div>'
@@ -600,10 +667,10 @@ function updateCollectionGrid() {
     const factionTag = getFactions(c).map(f => `<span class="c-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
     div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div>${factionTag ? `<div class="cmeta">${factionTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}${showAttr}</div>`;
     div.addEventListener('click', ()=>{
-      showCharDetail(c, onBoard, onAi || onCooldown || dead || isLocked || isOtherFlagWaiting);
-      if (onBoard||onAi||onCooldown||dead||isLocked||isOtherFlagWaiting) return;
+      showCharDetail(c, onBoard, onOther || onCooldown || dead || isLocked || isOtherFlagWaiting);
+      if (onBoard||onOther||onCooldown||dead||isLocked||isOtherFlagWaiting) return;
       selectedChar=c; updateCollectionGrid();
-      if (gamePhase==='place_player') setPhase(`已选 ${c.name} · 点击下方空位放置`);
+      if (gamePhase==='place_player' || (isGuestView() && gamePhase==='place_guest')) setPhase(`已选 ${c.name} · 点击下方空位放置`);
     });
     el.appendChild(div);
   });
@@ -612,20 +679,23 @@ function updateCollectionGrid() {
 function updateAiCollectionGrid() {
   const el = document.getElementById('aiCollectionGrid');
   const empty = document.getElementById('aiEmptyTip');
-  if (!ai.collection || !ai.collection.length) { el.innerHTML=''; empty.style.display='block'; return; }
+  const enemy = isGuestView() ? player : ai;
+  const enemyCooldowns = isGuestView() ? playerCooldowns : aiCooldowns;
+  const enemyCatFilter = isGuestView() ? playerCatFilter : aiCatFilter;
+  if (!enemy.collection || !enemy.collection.length) { el.innerHTML=''; empty.style.display='block'; return; }
   empty.style.display='none';
-  let filtered = [...ai.collection];
-  if (aiCatFilter !== 'all') filtered = filtered.filter(c => c.type === aiCatFilter);
+  let filtered = [...enemy.collection];
+  if (enemyCatFilter !== 'all') filtered = filtered.filter(c => c.type === enemyCatFilter);
   const totalScore = ch => ch.leadership+ch.martial+ch.intelligence+ch.politics;
   const ratingOrder={ 'S+':0,'S':1,'A':2,'B':3,'C':4,'D':5 };
-  const isAiFlagGen = c => ai.flagGenerals.some(fg => fg.id === c.id);
+  const isEnemyFlagGen = c => enemy.flagGenerals.some(fg => fg.id === c.id);
 
   filtered.sort((a,b) => {
     const aDead=isDead(a.id), bDead=isDead(b.id);
-    const aCd=isOnCooldown(a.id,false), bCd=isOnCooldown(b.id,false);
-    const aOn=ai.board.some(u=>u&&u.char.id===a.id)||player.board.some(u=>u&&u.char.id===a.id);
-    const bOn=ai.board.some(u=>u&&u.char.id===b.id)||player.board.some(u=>u&&u.char.id===b.id);
-    const aFg=isAiFlagGen(a), bFg=isAiFlagGen(b);
+    const aCd=isOnCooldown(a.id,isGuestView()), bCd=isOnCooldown(b.id,isGuestView());
+    const aOn=enemy.board.some(u=>u&&u.char.id===a.id)||(isGuestView() ? ai.board : player.board).some(u=>u&&u.char.id===a.id);
+    const bOn=enemy.board.some(u=>u&&u.char.id===b.id)||(isGuestView() ? ai.board : player.board).some(u=>u&&u.char.id===b.id);
+    const aFg=isEnemyFlagGen(a), bFg=isEnemyFlagGen(b);
     const aGrp=aDead?3:(aCd?2:(aOn?1:0));
     const bGrp=bDead?3:(bCd?2:(bOn?1:0));
     if (aGrp!==bGrp) return aGrp-bGrp;
@@ -636,14 +706,14 @@ function updateAiCollectionGrid() {
   });
   el.innerHTML = '';
   filtered.forEach(c => {
-    const onBoard = ai.board.some(u=>u&&u.char.id===c.id);
-    const onCooldown = isOnCooldown(c.id, false);
-    const cdRemaining = onCooldown ? (aiCooldowns.find(x => x.id === c.id)) : null;
+    const onBoard = enemy.board.some(u=>u&&u.char.id===c.id);
+    const onCooldown = isOnCooldown(c.id, isGuestView());
+    const cdRemaining = onCooldown ? (enemyCooldowns.find(x => x.id === c.id)) : null;
     const freezeRemaining = cdRemaining ? Math.max(0, (cdRemaining.round + 4) - round + 1) : 0;
     const dead = isDead(c.id);
-    const isFlagGen = isAiFlagGen(c);
-    const isLocked = ai.lockedFlagIds.includes(c.id);
-    const isCurrentFlag = ai.currentFlagCharId === c.id && onBoard;
+    const isFlagGen = isEnemyFlagGen(c);
+    const isLocked = enemy.lockedFlagIds.includes(c.id);
+    const isCurrentFlag = enemy.currentFlagCharId === c.id && onBoard;
     const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
     const div = document.createElement('div');
     div.className = 'char-card';
@@ -780,14 +850,21 @@ function showVictory(win) {
     const avgMelee = agg.meleeHits > 0 ? Math.round(agg.meleeDmg / agg.meleeHits) : 0;
     const avgRanged = agg.rangedHits > 0 ? Math.round(agg.rangedDmg / agg.rangedHits) : 0;
     mvpEl.style.display = 'block';
-    mvpEl.innerHTML = `<div class="v-mvp"><div class="v-mvp-title">🏅 MVP — ${bestChar.name}</div><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><img class="v-mvp-avatar" src="${generateAvatar(bestChar,56)}"><div><div class="v-mvp-name">${bestChar.name}</div><div class="v-mvp-meta">${renderFactionBadges(getFactions(bestChar))} · ${bestChar.type||''} · ${bestChar.rating||''} · 统${bestChar.leadership} 武${bestChar.martial} 智${bestChar.intelligence} 政${bestChar.politics}</div></div></div><div class="v-mvp-sub-title">⚔ 造成伤害</div><div class="v-mvp-row"><span class="lab">总伤害</span><span class="val">${agg.damage.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战总伤</span><span class="val">${agg.meleeDmg.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战</span><span class="val">${agg.meleeHits}次 · 均伤 ${avgMelee.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程总伤</span><span class="val">${agg.rangedDmg.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程</span><span class="val">${agg.rangedHits}次 · 均伤 ${avgRanged.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">击溃/击毙</span><span class="val">${agg.kills}人</span></div><div class="v-mvp-row"><span class="lab">大威风</span><span class="val">${agg.retreatTriggers}次</span></div></div>`;
+    const origLd = bestChar.orig_leadership !== undefined ? bestChar.orig_leadership : bestChar.leadership;
+    const origMr = bestChar.orig_martial !== undefined ? bestChar.orig_martial : bestChar.martial;
+    const origIt = bestChar.orig_intelligence !== undefined ? bestChar.orig_intelligence : bestChar.intelligence;
+    const origPo = bestChar.orig_politics !== undefined ? bestChar.orig_politics : bestChar.politics;
+    mvpEl.innerHTML = `<div class="v-mvp"><div class="v-mvp-title">🏅 MVP — ${bestChar.name}</div><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><img class="v-mvp-avatar" src="${generateAvatar(bestChar,56)}"><div><div class="v-mvp-name">${bestChar.name}</div><div class="v-mvp-meta">${renderFactionBadges(getFactions(bestChar))} · ${bestChar.type||''} · ${bestChar.rating||''} · 统${origLd} 武${origMr} 智${origIt} 政${origPo}</div></div></div><div class="v-mvp-sub-title">⚔ 造成伤害</div><div class="v-mvp-row"><span class="lab">总伤害</span><span class="val">${agg.damage.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战总伤</span><span class="val">${agg.meleeDmg.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">近战</span><span class="val">${agg.meleeHits}次 · 均伤 ${avgMelee.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程总伤</span><span class="val">${agg.rangedDmg.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">远程</span><span class="val">${agg.rangedHits}次 · 均伤 ${avgRanged.toLocaleString()}</span></div><div class="v-mvp-row"><span class="lab">击溃/击毙</span><span class="val">${agg.kills}人</span></div><div class="v-mvp-row"><span class="lab">大威风</span><span class="val">${agg.retreatTriggers}次</span></div></div>`;
   } else {
     mvpEl.style.display = 'none';
   }
 
   const rankEl = document.getElementById('rankDisplay');
   const allStats = Object.values(charAgg);
-  const sideLabel = s => s === 'player' ? '<span class="v-rank-side p">己</span>' : '<span class="v-rank-side a">敌</span>';
+  const sideLabel = s => {
+    if (isGuestView()) return s === 'player' ? '<span class="v-rank-side a">敌</span>' : '<span class="v-rank-side p">己</span>';
+    return s === 'player' ? '<span class="v-rank-side p">己</span>' : '<span class="v-rank-side a">敌</span>';
+  };
 
   function expandableSection(title, allItems, expandId, renderItem) {
     if (!allItems.length) return `<div class="v-rank-section"><div class="v-rank-title">${title}</div><div style="color:#666;font-size:12px;text-align:center">无</div></div>`;
@@ -808,10 +885,10 @@ function showVictory(win) {
     const agg = charAgg[bestCid];
     const dealtAll = Object.entries(agg.damage_to).map(([cid, dmg]) => ({ char: charAgg[cid]?.char, damage: dmg })).filter(e => e.char).sort((a, b) => b.damage - a.damage);
     const receivedAll = Object.entries(agg.damage_from).map(([cid, dmg]) => ({ char: charAgg[cid]?.char, damage: dmg })).filter(e => e.char).sort((a, b) => b.damage - a.damage);
-    topHtml += expandableSection('🗡 MVP造成伤害', dealtAll, 'mvpDealt', (item, rank, hidden, eid) =>
+    topHtml += expandableSection('🗡 MVP 傷つけ主', dealtAll, 'mvpDealt', (item, rank, hidden, eid) =>
       `<div class="v-rank-entry${hidden ? ' v-rank-entry-hidden' : ''}"${hidden ? ` data-expand="${eid}"` : ''}><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`
     );
-    topHtml += expandableSection('🛡 对MVP造成伤害', receivedAll, 'mvpRecv', (item, rank, hidden, eid) =>
+    topHtml += expandableSection('🛡 MVP 傷負わせ敵', receivedAll, 'mvpRecv', (item, rank, hidden, eid) =>
       `<div class="v-rank-entry${hidden ? ' v-rank-entry-hidden' : ''}"${hidden ? ` data-expand="${eid}"` : ''}><span class="v-rank-num">${rank}</span><img class="v-rank-avatar" src="${generateAvatar(item.char,32)}"><span class="v-rank-name">${item.char.name}</span><span class="v-rank-val">${item.damage.toLocaleString()}</span></div>`
     );
   }
@@ -864,10 +941,12 @@ function updateIncomeDisplay() {
 }
 
 function updateUI() {
-  document.getElementById('playerTroops').textContent = (player.troops||0).toLocaleString();
-  document.getElementById('aiTroops').textContent = (ai.troops||0).toLocaleString();
-  document.getElementById('playerTotalTroops').textContent = totalTroops(player).toLocaleString();
-  document.getElementById('aiTotalTroops').textContent = totalTroops(ai).toLocaleString();
+  const myTroops = isGuestView() ? ai.troops : player.troops;
+  const enTroops = isGuestView() ? player.troops : ai.troops;
+  document.getElementById('playerTroops').textContent = (myTroops||0).toLocaleString();
+  document.getElementById('aiTroops').textContent = (enTroops||0).toLocaleString();
+  document.getElementById('playerTotalTroops').textContent = totalTroops(isGuestView() ? ai : player).toLocaleString();
+  document.getElementById('aiTotalTroops').textContent = totalTroops(isGuestView() ? player : ai).toLocaleString();
   document.getElementById('drawPileCount').textContent = drawPileCount !== undefined ? drawPileCount : 0;
   document.getElementById('placementCount').textContent = `已放 ${placedThisTurn}/${PLACE_PER_ROUND}`;
   document.getElementById('roundDisplay').textContent = round;
@@ -910,11 +989,11 @@ function initSortBar() {
 
 // ==================== API ACTIONS ====================
 async function drawPhase() {
+  if (mpGameId && !mpIsHost) return;
   try {
     const data = await api.drawOptions(gameId);
     applyStateFromServer(data.state);
     if (data.options && data.options.length) {
-      // Restore original display stats
       data.options.forEach(c => {
         if (c.orig_leadership !== undefined) {
           c.leadership = c.orig_leadership; c.martial = c.orig_martial;
@@ -928,9 +1007,11 @@ async function drawPhase() {
       if (quickDrawMode) {
         setTimeout(() => {
           autoPickCard();
-          if (gamePhase !== 'pick_card') quickDrawMode = false;
+          if (gamePhase !== 'pick_card' && gamePhase !== 'multiplayer_pick_host') quickDrawMode = false;
         }, 60);
       }
+    } else {
+      clearDrawTimer();
     }
   } catch (e) {
     addBattleLog('抽卡失败：' + e.message, 'lose');
@@ -947,6 +1028,29 @@ function quickDrawPhase() {
   } else {
     drawPhase();
   }
+}
+
+function clearDrawTimer() {
+  if (mpDrawTimer) { clearInterval(mpDrawTimer); mpDrawTimer = null; }
+  document.getElementById('mpDrawTimer').style.display = 'none';
+}
+
+function startDrawTimer() {
+  clearDrawTimer();
+  if (!mpGameId) return; // only in multiplayer
+  let remain = MP_DRAW_TIMEOUT;
+  const el = document.getElementById('mpDrawTimer');
+  el.style.display = 'inline';
+  el.textContent = `${remain}s`;
+  mpDrawTimer = setInterval(() => {
+    remain--;
+    if (remain <= 0) {
+      clearDrawTimer();
+      autoPickCard();
+      return;
+    }
+    el.textContent = `${remain}s`;
+  }, 1000);
 }
 
 function showPickModal(options) {
@@ -981,21 +1085,33 @@ function showPickModal(options) {
     grid.appendChild(div);
   });
   document.getElementById('pickModal').classList.add('show');
+  startDrawTimer();
 }
 
 async function pickCard(charId) {
+  if (mpGameId && gamePhase === 'multiplayer_pick_guest') {
+    await pickCardGuest(charId);
+    return;
+  }
   try {
+    clearDrawTimer();
     const data = await api.pickCard(gameId, charId);
     document.getElementById('pickModal').classList.remove('show');
     applyStateFromServer(data.state);
-    if (gamePhase === 'pick_card') {
+    if (!_isAutoPlaying && (gamePhase === 'pick_card' || gamePhase === 'multiplayer_pick_host')) {
       drawPhase();
+    } else if (_isAutoPlaying) {
+      // Auto-play: loop handles next draw step, no need for drawPhase
+      document.getElementById('pickModal').classList.remove('show');
     } else {
       quickDrawMode = false;
       const qb = document.getElementById('pickQuickBtn');
       if (qb) qb.disabled = false;
       const ab = document.getElementById('pickAutoBtn');
       if (ab) ab.disabled = false;
+      if (mpGameId && mpIsHost && (gamePhase === 'multiplayer_draw_guest' || gamePhase === 'place_guest')) {
+        handleHostTurn();
+      }
     }
   } catch (e) {
     addBattleLog('选卡失败：' + e.message, 'lose');
@@ -1032,51 +1148,66 @@ function autoPickCard() {
 }
 
 async function endPlacement() {
+  if (gamePhase === 'place_guest') { await endPlacementGuest(); return; }
   if (gamePhase !== 'place_player') return;
-  MusicManager.play('battle');
   try {
     const data = await api.endTurn(gameId);
     applyStateFromServer(data);
+    if (data.multiplayer) { handleHostTurn(); }
   } catch (e) {
     addBattleLog('结束回合失败：' + e.message, 'lose');
   }
 }
 
 function toggleAutoPlay() {
+  if (mpGameId) { alert('多人模式无法使用托管'); return; }
   autoPlay = !autoPlay;
   if (autoPlay) {
-    document.getElementById('btnAutoPlace').textContent = '⚡自动中';
-    document.getElementById('btnAutoPlace').className = 'btn btn-small active';
-    document.getElementById('btnDraw').disabled = true;
+    _isAutoPlaying = true;
+    document.getElementById('btnAutoPerm').textContent = '⚡自动中';
+    document.getElementById('btnAutoPerm').className = 'btn btn-small active';
+    document.getElementById('btnAutoOneRound').disabled = true;
     document.getElementById('btnEndTurn').disabled = true;
     runAutoPlay();
   } else {
-    document.getElementById('btnAutoPlace').textContent = '托管';
-    document.getElementById('btnAutoPlace').className = 'btn btn-small';
+    _isAutoPlaying = false;
+    document.getElementById('btnAutoPerm').textContent = '一键托管';
+    document.getElementById('btnAutoPerm').className = 'btn btn-small';
     updateButtonStates();
+    if (gamePhase === 'draw' && !mpGameId) {
+      setTimeout(() => { if (gamePhase==='draw' && !_isAutoPlaying) drawPhase(); }, 100);
+    }
   }
+}
+
+function pickBestOption(options) {
+  const maxTotal = Math.max(...options.map(c => (c.leadership||0) + (c.martial||0) + (c.intelligence||0) + (c.politics||0)));
+  let best = options.filter(c => (c.leadership + c.martial + c.intelligence + c.politics) === maxTotal);
+  const quanNeng = best.filter(c => c.type === '全能');
+  if (quanNeng.length > 0) best = quanNeng;
+  return best.length === 1 ? best[0] : best[Math.floor(Math.random() * best.length)];
 }
 
 async function runAutoPlay() {
   if (!autoPlay) return;
   if (gamePhase === 'gameover') { toggleAutoPlay(); return; }
   try {
-    if (gamePhase === 'idle' || gamePhase === 'draw' || gamePhase === 'pick_card') {
-      const data = await api.drawOptions(gameId);
-      applyStateFromServer(data.state);
-      if (data.options && data.options.length) {
-        const pickData = await api.pickCard(gameId, data.options[0].id);
-        applyStateFromServer(pickData.state);
+    if (gamePhase === 'draw' || gamePhase === 'pick_card') {
+      // Process ALL remaining draw steps for this round at once
+      while (gamePhase === 'draw' || gamePhase === 'pick_card') {
+        const data = await api.drawOptions(gameId);
+        applyStateFromServer(data.state);
+        if (data.options && data.options.length) {
+          const best = pickBestOption(data.options);
+          const pickData = await api.pickCard(gameId, best.id);
+          applyStateFromServer(pickData.state);
+        } else {
+          break;
+        }
       }
     } else if (gamePhase === 'place_player') {
-      let data = await api.autoPlace(gameId);
+      const data = await api.autoPlace(gameId);
       applyStateFromServer(data.state || data);
-      data = data.state || data;
-      if (data.game_phase === 'place_player' || data.gamePhase === 'place_player') {
-        MusicManager.play('battle');
-        data = await api.endTurn(gameId);
-        applyStateFromServer(data.state || data);
-      }
     } else {
       setTimeout(runAutoPlay, 300);
       return;
@@ -1086,6 +1217,51 @@ async function runAutoPlay() {
     addBattleLog('操作失败：' + e.message, 'lose');
     toggleAutoPlay();
   }
+}
+
+async function autoPlayOneRound() {
+  if (mpGameId) return;
+  if (gamePhase === 'gameover') return;
+  _isAutoPlaying = true;
+  const btn = document.getElementById('btnAutoOneRound');
+  btn.textContent = '⚡一回合中';
+  btn.className = 'btn btn-small active';
+  document.getElementById('btnAutoPerm').disabled = true;
+  document.getElementById('btnEndTurn').disabled = true;
+  try {
+    while (gamePhase !== 'gameover') {
+      if (gamePhase === 'draw' || gamePhase === 'pick_card') {
+        // Process ALL remaining draw steps for this round at once
+        while (gamePhase === 'draw' || gamePhase === 'pick_card') {
+          const data = await api.drawOptions(gameId);
+          applyStateFromServer(data.state);
+          if (data.options && data.options.length) {
+            const best = pickBestOption(data.options);
+            const pickData = await api.pickCard(gameId, best.id);
+            applyStateFromServer(pickData.state);
+          } else {
+            break;
+          }
+        }
+      } else if (gamePhase === 'place_player') {
+        await api.autoPlace(gameId).then(r => applyStateFromServer(r.state || r));
+        break;
+      } else {
+        await new Promise(r => setTimeout(r, 200));
+      }
+    }
+  } catch (e) {
+    addBattleLog('自动操作失败：' + e.message, 'lose');
+  }
+  _isAutoPlaying = false;
+  // Re-enable auto-draw UI for next round (may have ended at phase='draw' after battle)
+  if (gamePhase === 'draw' && !mpGameId) {
+    setTimeout(() => { if (gamePhase==='draw' && !_isAutoPlaying) drawPhase(); }, 100);
+  }
+  btn.textContent = '托管一回合';
+  btn.className = 'btn btn-small';
+  document.getElementById('btnAutoPerm').disabled = false;
+  updateButtonStates();
 }
 
 async function resetGame() {
@@ -1104,6 +1280,7 @@ async function resetGame() {
 }
 
 async function restartGame() {
+  if (mpGameId) { alert('多人模式无法重新开始'); return; }
   if (!confirm('确定要重新开始吗？当前对局数据将被清空。')) return;
   clearGameState();
   try {
@@ -1121,7 +1298,12 @@ function clearGameState() {
 }
 
 function backToMenu() {
-  if (round > 0 || (gamePhase !== 'idle' && gamePhase !== 'gameover')) {
+  if (mpGameId) {
+    if (!confirm('确定要返回主菜单吗？多人对战将断开连接。')) return;
+    if (mpPollTimer) { clearInterval(mpPollTimer); mpPollTimer = null; }
+    try { api.roomLeave({ room_id: mpRoomId, token: mpToken }); } catch(e) {}
+    mpRoomId = null; mpToken = null; mpIsHost = false; mpGameId = null;
+  } else if (round > 0 || (gamePhase !== 'idle' && gamePhase !== 'gameover')) {
     if (!confirm('确定要返回主菜单吗？本局对战数据将丢失。')) return;
   }
   if (autoPlay) toggleAutoPlay();
@@ -1148,10 +1330,446 @@ async function setTerrain(mode) {
   renderBoardFull();
 }
 
-// ==================== MAIN MENU ====================
-function menuPlaceholder(name) {
-  if (name === '游戏设置') { openSettings(); return; }
-  addBattleLog(`「${name}」功能开发中，敬请期待`, 'info');
+// ==================== CUSTOM GENERAL MODAL ====================
+function askCustomGenerals() {
+  return new Promise(resolve => {
+    const modal = document.getElementById('customGenModal');
+    modal.classList.add('show');
+    const yesBtn = document.getElementById('cgmYes');
+    const noBtn = document.getElementById('cgmNo');
+    const cleanup = () => modal.classList.remove('show');
+    yesBtn.onclick = () => { cleanup(); resolve(true); };
+    noBtn.onclick = () => { cleanup(); resolve(false); };
+  });
+}
+
+// ==================== MULTIPLAYER ROOM ====================
+let mpRoomId = null, mpToken = null, mpIsHost = false, mpGameId = null;
+let mpPollTimer = null;
+let mpDrawTimer = null;
+const MP_DRAW_TIMEOUT = 20;
+
+function openMultiplayer() {
+  document.getElementById('mainMenu').style.display = 'none';
+  document.getElementById('roomOverlay').classList.add('show');
+  refreshRoomList();
+}
+
+function closeMultiplayer() {
+  document.getElementById('roomOverlay').classList.remove('show');
+  document.getElementById('mainMenu').style.display = 'flex';
+  if (mpPollTimer) { clearInterval(mpPollTimer); mpPollTimer = null; }
+  _cgLoaded = false;
+}
+
+async function refreshRoomList() {
+  const container = document.getElementById('roomList');
+  try {
+    const data = await api.roomList();
+    const rooms = data.rooms || [];
+    if (rooms.length === 0) {
+      container.innerHTML = '<div class="room-empty">暂无可用房间，点击上方创建</div>';
+      return;
+    }
+    let html = '<table class="room-table"><thead><tr><th>房间号</th><th>自定义武将</th><th>状态</th><th></th></tr></thead><tbody>';
+    rooms.forEach(r => {
+      html += `<tr><td style="font-family:monospace;font-size:15px;letter-spacing:1px;color:#f5a623">${r.room_id}</td>`
+        + `<td style="color:#888;font-size:12px">${r.use_custom_generals ? '是' : '否'}</td>`
+        + `<td style="color:#4fc3f7">等待中</td>`
+        + `<td><button class="btn btn-small btn-outline" onclick="joinRoom('${r.room_id}')">加入</button></td></tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<div style="text-align:center;padding:24px;color:#e94560">加载失败：${e.message}</div>`;
+  }
+}
+
+async function createRoom() {
+  const useCustom = await askCustomGenerals();
+  if (useCustom === null) return;
+  try {
+    const data = await api.roomCreate({ use_custom_generals: useCustom });
+    mpRoomId = data.room_id;
+    mpToken = data.host_token;
+    mpIsHost = true;
+    showLobby();
+  } catch (e) {
+    addBattleLog('创建房间失败：' + e.message, 'lose');
+    alert('创建房间失败：' + e.message);
+  }
+}
+
+async function joinRoom(roomId) {
+  try {
+    const data = await api.roomJoin({ room_id: roomId });
+    mpRoomId = data.room_id;
+    mpToken = data.guest_token;
+    mpIsHost = false;
+    showLobby();
+  } catch (e) {
+    addBattleLog('加入房间失败：' + e.message, 'lose');
+    alert('加入房间失败：' + e.message);
+  }
+}
+
+async function leaveRoom() {
+  clearDrawTimer();
+  if (mpPollTimer) { clearInterval(mpPollTimer); mpPollTimer = null; }
+  try {
+    await api.roomLeave({ room_id: mpRoomId, token: mpToken });
+  } catch (e) { /* ignore */ }
+  mpRoomId = null; mpToken = null; mpIsHost = false; mpGameId = null; _cgLoaded = false;
+  document.getElementById('lobbyOverlay').classList.remove('show');
+  document.getElementById('roomOverlay').classList.add('show');
+  refreshRoomList();
+}
+
+async function startRoomGame() {
+  try {
+    const data = await api.roomStart({ room_id: mpRoomId, token: mpToken });
+    mpGameId = data.game_id;
+    document.getElementById('lobbyStartBtn').style.display = 'none';
+    document.getElementById('lobbyWaiting').textContent = '游戏开始！';
+    startCountdown(data.countdown || 5);
+  } catch (e) {
+    addBattleLog('开始游戏失败：' + e.message, 'lose');
+    alert('开始失败：' + e.message);
+  }
+}
+
+function startCountdown(seconds) {
+  const el = document.getElementById('lobbyCountdown');
+  el.style.display = 'block';
+  let remain = seconds;
+  el.textContent = remain;
+  const iv = setInterval(() => {
+    remain--;
+    if (remain <= 0) {
+      clearInterval(iv);
+      el.style.display = 'none';
+      enterMultiplayerGame();
+      return;
+    }
+    el.textContent = remain;
+  }, 1000);
+}
+
+function showLobby() {
+  document.getElementById('roomOverlay').classList.remove('show');
+  document.getElementById('lobbyOverlay').classList.add('show');
+  document.getElementById('lobbyRoomId').textContent = mpRoomId;
+  document.getElementById('lobbyHostIcon').textContent = '🟢';
+  document.getElementById('lobbyGuestIcon').textContent = '⏳';
+  document.getElementById('lobbyGuestLabel').textContent = '等待中...';
+  document.getElementById('lobbyGuestReady').textContent = '';
+  document.getElementById('lobbyCountdown').style.display = 'none';
+  document.getElementById('lobbyReadyBtn').style.display = 'none';
+  document.getElementById('lobbyStartBtn').style.display = 'none';
+  document.getElementById('lobbyCgCards').innerHTML = '';
+  document.getElementById('lobbyWaiting').style.display = 'block';
+  if (mpIsHost) {
+    document.getElementById('lobbyHostLabel').textContent = '你 (房主)';
+    document.getElementById('lobbyWaiting').textContent = '等待对手加入...';
+    document.getElementById('lobbyReadyBtn').textContent = '准备';
+    document.getElementById('lobbyReadyBtn').style.display = 'inline-block';
+    document.getElementById('lobbyHostReady').textContent = '未准备';
+    document.getElementById('lobbyHostReady').className = 'ready-no';
+  } else {
+    document.getElementById('lobbyHostLabel').textContent = '对手';
+    document.getElementById('lobbyWaiting').textContent = '等待房主开始游戏...';
+    document.getElementById('lobbyReadyBtn').textContent = '准备';
+    document.getElementById('lobbyReadyBtn').style.display = 'inline-block';
+    document.getElementById('lobbyHostReady').textContent = '未准备';
+    document.getElementById('lobbyHostReady').className = 'ready-no';
+  }
+  // Start polling room status
+  if (mpPollTimer) clearInterval(mpPollTimer);
+  mpPollTimer = setInterval(pollLobby, 1000);
+  // Immediate initial poll to show custom general status
+  pollLobby();
+}
+
+async function toggleReady() {
+  if (!mpRoomId || !mpToken) return;
+  try {
+    const data = await api.roomReady({ room_id: mpRoomId, token: mpToken });
+    pollLobbyRoomState(data);
+  } catch (e) { /* ignore */ }
+}
+
+async function fetchCustomGenerals() {
+  try {
+    const r = await fetch('/api/characters/custom');
+    const d = await r.json();
+    return d.generals || [];
+  } catch (_) { return []; }
+}
+
+function renderLobbyCgCards(generals) {
+  const container = document.getElementById('lobbyCgCards');
+  if (!generals || generals.length === 0) {
+    container.innerHTML = '<div style="color:#555;font-size:11px;padding:8px">暂无自建武将</div>';
+    return;
+  }
+  let html = '';
+  generals.forEach(g => {
+    const total = (g.leadership || 0) + (g.martial || 0) + (g.intelligence || 0) + (g.politics || 0);
+    html += `<div class="lobby-cg-card">
+      <img src="portraits/${g.avatarId || 501}.webp" alt="${escHtml(g.name)}">
+      <div class="cg-card-name">${escHtml(g.name)}</div>
+      <div class="cg-card-stat">统${g.leadership||0} 武${g.martial||0}</div>
+      <div class="cg-card-stat">智${g.intelligence||0} 政${g.politics||0}</div>
+      <div class="cg-card-total">总分${total}</div>
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+let _cgLoaded = false;
+
+function pollLobbyRoomState(data) {
+  document.getElementById('lobbyHostReady').textContent = data.host_ready ? '已准备' : '未准备';
+  document.getElementById('lobbyHostReady').className = data.host_ready ? 'ready-yes' : 'ready-no';
+  if (data.has_guest) {
+    document.getElementById('lobbyGuestIcon').textContent = '🟢';
+    document.getElementById('lobbyGuestLabel').textContent = mpIsHost ? '对手已加入' : '你';
+    document.getElementById('lobbyGuestReady').textContent = data.guest_ready ? '已准备' : '未准备';
+    document.getElementById('lobbyGuestReady').className = data.guest_ready ? 'ready-yes' : 'ready-no';
+    // Show ready button
+    document.getElementById('lobbyReadyBtn').style.display = 'inline-block';
+    const isMeReady = mpIsHost ? data.host_ready : data.guest_ready;
+    document.getElementById('lobbyReadyBtn').textContent = isMeReady ? '取消准备' : '准备';
+    // Show start button for host when both ready
+    if (mpIsHost && data.host_ready && data.guest_ready) {
+      document.getElementById('lobbyStartBtn').style.display = 'inline-block';
+      document.getElementById('lobbyWaiting').style.display = 'none';
+    } else if (mpIsHost) {
+      document.getElementById('lobbyStartBtn').style.display = 'none';
+      document.getElementById('lobbyWaiting').textContent = '等待双方准备就绪...';
+      document.getElementById('lobbyWaiting').style.display = 'block';
+    }
+    if (!mpIsHost) {
+      document.getElementById('lobbyWaiting').textContent = data.host_ready ? '房主已准备' : '等待房主准备...';
+    }
+  }
+  // Show custom general status
+  const cgStatusEl = document.getElementById('lobbyCgStatus');
+  if (data.use_custom_generals) {
+    cgStatusEl.textContent = '🎴 已加入自建武将';
+    cgStatusEl.style.color = '#4fc3f7';
+    if (!_cgLoaded) {
+      _cgLoaded = true;
+      fetchCustomGenerals().then(gens => renderLobbyCgCards(gens));
+    }
+  } else {
+    cgStatusEl.textContent = '未加入自建武将';
+    cgStatusEl.style.color = '#888';
+  }
+}
+
+async function pollLobby() {
+  if (!mpRoomId || !mpToken) return;
+  try {
+    const data = await api.roomStatus({ room_id: mpRoomId, token: mpToken });
+    pollLobbyRoomState(data);
+    if (data.game_id) {
+      mpGameId = data.game_id;
+      if (mpPollTimer) { clearInterval(mpPollTimer); mpPollTimer = null; }
+      document.getElementById('lobbyStartBtn').style.display = 'none';
+      document.getElementById('lobbyReadyBtn').style.display = 'none';
+      document.getElementById('lobbyWaiting').textContent = '游戏开始！';
+      startCountdown(5);
+    }
+  } catch (e) { /* ignore polling errors */ }
+}
+
+function enterMultiplayerGame() {
+  document.getElementById('lobbyOverlay').classList.remove('show');
+  document.getElementById('mainMenu').style.display = 'none';
+  document.getElementById('gameHeader').style.display = 'flex';
+  document.getElementById('gameContent').style.display = 'flex';
+  initBoard();
+  initSortBar();
+  initFilters();
+  // Load game state
+  loadMultiplayerGame();
+}
+
+async function loadMultiplayerGame() {
+  try {
+    const data = await api.getState(mpGameId);
+    gameId = mpGameId;
+    applyStateFromServer(data);
+    if (mpIsHost) {
+      handleHostTurn();
+    } else {
+      handleGuestTurn();
+    }
+  } catch (e) {
+    addBattleLog('加载游戏失败：' + e.message, 'lose');
+  }
+}
+
+// ==================== MULTIPLAYER TURN LOGIC ====================
+async function handleHostTurn() {
+  if (gamePhase === 'multiplayer_draw_host' || gamePhase === 'multiplayer_pick_host') {
+    await drawPhase();
+    // drawPhase shows pick modal which starts its own timer; no fallback needed here
+  } else if (gamePhase === 'place_player') {
+    setPhase('🏯 放置你的部队');
+    updateButtonStates();
+  } else if (gamePhase === 'multiplayer_draw_guest' || gamePhase === 'multiplayer_pick_guest') {
+    setPhase('⏳ 等待对方抽卡...');
+    updateButtonStates();
+    setTimeout(pollHostTurn, 1000);
+  } else if (gamePhase === 'place_guest') {
+    setPhase('⏳ 等待对方放置...');
+    updateButtonStates();
+    setTimeout(pollHostTurn, 1000);
+  } else if (gamePhase === 'idle') {
+    // Next round, host draws
+    setTimeout(async () => {
+      try {
+        await drawPhase();
+      } catch (e) {
+        addBattleLog('抽卡失败：' + e.message, 'lose');
+      }
+    }, 500);
+  } else if (gamePhase === 'gameover') {
+    setPhase('🏁 游戏结束');
+    updateButtonStates();
+  } else {
+    // AI phase, treat as wait (battle executes server-side)
+    setPhase('⏳ 战斗进行中...');
+    setTimeout(pollHostTurn, 1000);
+  }
+}
+
+async function pollHostTurn() {
+  try {
+    const data = await api.getState(mpGameId);
+    gameId = mpGameId;
+    applyStateFromServer(data);
+    handleHostTurn();
+  } catch (e) {
+    setTimeout(pollHostTurn, 1000);
+  }
+}
+
+async function handleGuestTurn() {
+  if (gamePhase === 'multiplayer_draw_guest' || gamePhase === 'multiplayer_pick_guest') {
+    await drawPhaseGuest();
+  } else if (gamePhase === 'place_guest') {
+    setPhase('🏯 放置你的部队');
+    updateButtonStates();
+  } else if (gamePhase === 'multiplayer_draw_host' || gamePhase === 'multiplayer_pick_host') {
+    setPhase('⏳ 等待对方抽卡...');
+    updateButtonStates();
+    setTimeout(pollGuestTurn, 1000);
+  } else if (gamePhase === 'place_player') {
+    setPhase('⏳ 等待对方放置...');
+    updateButtonStates();
+    setTimeout(pollGuestTurn, 1000);
+  } else if (gamePhase === 'idle') {
+    setPhase('⏳ 等待对方抽卡...');
+    setTimeout(pollGuestTurn, 1000);
+  } else if (gamePhase === 'gameover') {
+    setPhase('🏁 游戏结束');
+    updateButtonStates();
+  } else {
+    setPhase('⏳ 战斗进行中...');
+    setTimeout(pollGuestTurn, 1000);
+  }
+}
+
+async function pollGuestTurn() {
+  try {
+    const data = await api.getState(mpGameId);
+    gameId = mpGameId;
+    applyStateFromServer(data);
+    handleGuestTurn();
+  } catch (e) {
+    setTimeout(pollGuestTurn, 1000);
+  }
+}
+
+// Guest draw/place/end-turn functions
+async function drawPhaseGuest() {
+  try {
+    const data = await api.drawOptionsGuest(mpGameId);
+    applyStateFromServer(data.state);
+    if (data.options && data.options.length) {
+      data.options.forEach(c => {
+        if (c.orig_leadership !== undefined) {
+          c.leadership = c.orig_leadership; c.martial = c.orig_martial;
+          c.intelligence = c.orig_intelligence; c.politics = c.orig_politics;
+        }
+      });
+      showPickModalGuest(data.options);
+    }
+  } catch (e) {
+    addBattleLog('抽卡失败：' + e.message, 'lose');
+    setTimeout(pollGuestTurn, 1000);
+  }
+}
+
+function showPickModalGuest(options) {
+  const grid = document.getElementById('pickGrid');
+  const title = document.querySelector('#pickModal h2');
+  title.textContent = '选择武将牌（对手）';
+  grid.innerHTML = '';
+  options.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'pick-card';
+    const ratingColor = RATING_COLORS[c.rating] || '#aaa';
+    const typeColor = TYPE_COLORS[c.type] || '#aaa';
+    const total = c.leadership + c.martial + c.intelligence + c.politics;
+    const factionPickTags = getFactions(c).map(f => `<span style="font-size:9px;color:${FACTION_COLORS[f]||'#888'};background:rgba(0,0,0,.4);padding:0 4px;border-radius:3px">${f}</span>`).join(' ');
+    div.innerHTML = `
+      <img class="pc-avatar" src="${generateAvatar(c, 70)}" alt="${c.name}">
+      <div class="pc-name">${c.name} ${factionPickTags}</div>
+      <div class="pc-type" style="color:${typeColor}">${c.type}</div>
+      <div class="pc-rating" style="color:${ratingColor}">${c.rating}</div>
+      <div class="pc-stats">统${c.leadership} 武${c.martial} 智${c.intelligence} 政${c.politics}</div>
+      <div class="pc-attr-bar"><span class="pc-attr-l">统</span><span class="pc-attr-f" style="width:${c.leadership}%"></span></div>
+      <div class="pc-attr-bar"><span class="pc-attr-l">武</span><span class="pc-attr-f" style="width:${c.martial}%;background:#f5a623"></span></div>
+      <div class="pc-attr-bar"><span class="pc-attr-l">智</span><span class="pc-attr-f" style="width:${c.intelligence}%;background:#2ecc71"></span></div>
+      <div class="pc-attr-bar"><span class="pc-attr-l">政</span><span class="pc-attr-f" style="width:${c.politics}%;background:#3498db"></span></div>
+      <div class="pc-total">总分 ${total}</div>
+    `;
+    div.addEventListener('click', () => pickCardGuest(c.id));
+    grid.appendChild(div);
+  });
+  document.getElementById('pickModal').classList.add('show');
+  startDrawTimer();
+}
+
+async function pickCardGuest(charId) {
+  try {
+    clearDrawTimer();
+    const data = await api.pickCardGuest(mpGameId, charId);
+    document.getElementById('pickModal').classList.remove('show');
+    applyStateFromServer(data.state);
+    if (gamePhase === 'multiplayer_pick_guest') {
+      await drawPhaseGuest();
+    } else {
+      handleGuestTurn();
+    }
+  } catch (e) {
+    addBattleLog('选卡失败：' + e.message, 'lose');
+  }
+}
+
+async function endPlacementGuest() {
+  if (gamePhase !== 'place_guest') return;
+  try {
+    const data = await api.endPlacementGuest(mpGameId);
+    applyStateFromServer(data);
+    handleGuestTurn();
+  } catch (e) {
+    addBattleLog('结束回合失败：' + e.message, 'lose');
+  }
 }
 
 function quitGame() {
@@ -1200,6 +1818,15 @@ async function openCharEditor() {
     editorChars = data.map(c => JSON.parse(JSON.stringify(c)));
     recalcRatings(editorOriginals);
     recalcRatings(editorChars);
+    editorSortBy = 'id';
+    document.querySelectorAll('#editorSortBar .sort-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#editorSortBar .sort-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        editorSortBy = btn.dataset.sort;
+        renderEditorGrid();
+      });
+    });
     renderEditorGrid();
   } catch (e) {
     grid.innerHTML = `<div style="color:#e94560;padding:40px;text-align:center">加载失败: ${e.message}</div>`;
@@ -1222,7 +1849,17 @@ function closeCharEditor() {
 function renderEditorGrid() {
   const grid = document.getElementById('editorGrid');
   const factionOptions = Object.keys(FACTION_COLORS).sort().map(f => `<option value="${f}">${f}</option>`).join('');
-  grid.innerHTML = editorChars.map((c, i) => {
+  const sorted = [...editorChars].map((c, i) => ({c, i})).sort((a, b) => {
+    const c = a.c, d = b.c;
+    const mapA = editorFactionMap[c.name], mapB = editorFactionMap[d.name];
+    const fa = typeof mapA === 'string' ? mapA : (mapA?.primary || '群雄');
+    const fb = typeof mapB === 'string' ? mapB : (mapB?.primary || '群雄');
+    if (editorSortBy === 'id') return c.id - d.id;
+    if (editorSortBy === 'name') return c.name.localeCompare(d.name);
+    if (editorSortBy === 'faction') return fa.localeCompare(fb) || c.id - d.id;
+    return (d[editorSortBy]||0) - (c[editorSortBy]||0);
+  });
+  grid.innerHTML = sorted.map(({c, i}) => {
     const orig = editorOriginals[i];
     const mapEntry = editorFactionMap[c.name];
     const defaultFaction = typeof mapEntry === 'string' ? mapEntry : (mapEntry?.primary || '群雄');
@@ -1245,17 +1882,48 @@ function renderEditorGrid() {
         <select class="ec-input ec-faction" data-idx="${i}" style="color:${FACTION_COLORS[curFaction]||'#888'}">${factionOptions.replace(`value="${curFaction}"`, `value="${curFaction}" selected`)}</select>
         <span style="font-size:8px;color:#888;margin-left:2px">${curFactions.map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('/')}</span>
       </div>
-      <div class="ec-field"><span class="ec-label">统</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="leadership" type="number" min="0" max="100" value="${c.leadership}"></div>
-      <div class="ec-field"><span class="ec-label">武</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="martial" type="number" min="0" max="100" value="${c.martial}"></div>
-      <div class="ec-field"><span class="ec-label">智</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="intelligence" type="number" min="0" max="100" value="${c.intelligence}"></div>
-      <div class="ec-field"><span class="ec-label">政</span><input class="ec-input ec-stat" data-idx="${i}" data-stat="politics" type="number" min="0" max="100" value="${c.politics}"></div>
+      <div class="ec-field ec-field-stat">
+        <span class="ec-label">统</span>
+        <div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${c.leadership}%;background:#e94560"></div></div>
+        <input class="ec-input ec-stat" data-idx="${i}" data-stat="leadership" type="number" min="0" max="100" value="${c.leadership}">
+        <button class="ec-stat-btn ec-stat-up" data-idx="${i}" data-stat="leadership">+</button>
+        <button class="ec-stat-btn ec-stat-dn" data-idx="${i}" data-stat="leadership">−</button>
+      </div>
+      <div class="ec-field ec-field-stat">
+        <span class="ec-label">武</span>
+        <div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${c.martial}%;background:#f5a623"></div></div>
+        <input class="ec-input ec-stat" data-idx="${i}" data-stat="martial" type="number" min="0" max="100" value="${c.martial}">
+        <button class="ec-stat-btn ec-stat-up" data-idx="${i}" data-stat="martial">+</button>
+        <button class="ec-stat-btn ec-stat-dn" data-idx="${i}" data-stat="martial">−</button>
+      </div>
+      <div class="ec-field ec-field-stat">
+        <span class="ec-label">智</span>
+        <div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${c.intelligence}%;background:#2ecc71"></div></div>
+        <input class="ec-input ec-stat" data-idx="${i}" data-stat="intelligence" type="number" min="0" max="100" value="${c.intelligence}">
+        <button class="ec-stat-btn ec-stat-up" data-idx="${i}" data-stat="intelligence">+</button>
+        <button class="ec-stat-btn ec-stat-dn" data-idx="${i}" data-stat="intelligence">−</button>
+      </div>
+      <div class="ec-field ec-field-stat">
+        <span class="ec-label">政</span>
+        <div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${c.politics}%;background:#3498db"></div></div>
+        <input class="ec-input ec-stat" data-idx="${i}" data-stat="politics" type="number" min="0" max="100" value="${c.politics}">
+        <button class="ec-stat-btn ec-stat-up" data-idx="${i}" data-stat="politics">+</button>
+        <button class="ec-stat-btn ec-stat-dn" data-idx="${i}" data-stat="politics">−</button>
+      </div>
       <div class="ec-total">总分 ${c.leadership + c.martial + c.intelligence + c.politics}</div>
       <button class="ec-btn${changed ? '' : ' ec-btn-disabled'}" data-idx="${i}" onclick="restoreChar(${i})">恢复</button>
     </div>`;
   }).join('');
   // Attach input listeners
   grid.querySelectorAll('.ec-stat').forEach(el => {
-    el.addEventListener('input', onStatChange);
+    el.addEventListener('input', onStatInput);
+    el.addEventListener('blur', onStatBlur);
+  });
+  grid.querySelectorAll('.ec-stat-up').forEach(el => {
+    el.addEventListener('click', onStatUp);
+  });
+  grid.querySelectorAll('.ec-stat-dn').forEach(el => {
+    el.addEventListener('click', onStatDn);
   });
   grid.querySelectorAll('.ec-type').forEach(el => {
     el.addEventListener('change', onSelectChange);
@@ -1263,19 +1931,103 @@ function renderEditorGrid() {
   grid.querySelectorAll('.ec-faction').forEach(el => {
     el.addEventListener('change', onFactionChange);
   });
+  // Draggable stat bars
+  grid.querySelectorAll('.ec-stat-bar').forEach(bar => {
+    const field = bar.closest('.ec-field-stat');
+    const input = field.querySelector('.ec-stat');
+    const fill = field.querySelector('.ec-stat-fill');
+    const idx = parseInt(input.dataset.idx);
+    const stat = input.dataset.stat;
+    function setValFromEvent(e) {
+      const rect = bar.getBoundingClientRect();
+      const x = (e.clientX || e.touches?.[0]?.clientX || 0) - rect.left;
+      const v = Math.round(Math.max(0, Math.min(100, (x / rect.width) * 100)));
+      editorChars[idx][stat] = v;
+      fill.style.width = v + '%';
+      input.value = v;
+      const card = bar.closest('.ec-card');
+      const te = card?.querySelector('.ec-total');
+      if (te) {
+        const c = editorChars[idx];
+        te.textContent = `总分 ${c.leadership + c.martial + c.intelligence + c.politics}`;
+      }
+    }
+    function onDown(e) {
+      e.preventDefault();
+      setValFromEvent(e);
+      const onMove = e2 => { setValFromEvent(e2); };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, {passive:true});
+      document.addEventListener('touchend', onUp);
+    }
+    bar.addEventListener('mousedown', onDown);
+    bar.addEventListener('touchstart', onDown, {passive:false});
+  });
 }
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function onStatChange(e) {
-  const el = e.target;
+function updateCardUI(idx) {
+  const c = editorChars[idx];
+  const card = document.querySelector(`.ec-stat[data-idx="${idx}"]`)?.closest('.ec-card');
+  if (!card) return;
+  card.querySelectorAll('.ec-field-stat').forEach(field => {
+    const stat = field.querySelector('.ec-stat').dataset.stat;
+    field.querySelector('.ec-stat-fill').style.width = c[stat] + '%';
+    field.querySelector('.ec-stat').value = c[stat];
+  });
+  const totalEl = card.querySelector('.ec-total');
+  if (totalEl) totalEl.textContent = `总分 ${c.leadership + c.martial + c.intelligence + c.politics}`;
+}
+
+function doStatUpdate(el) {
   const idx = parseInt(el.dataset.idx);
   const stat = el.dataset.stat;
-  const v = parseInt(el.value) || 0;
-  editorChars[idx][stat] = Math.max(0, Math.min(100, v));
+  const v = Math.max(0, Math.min(100, parseInt(el.value) || 0));
+  el.value = v;
+  editorChars[idx][stat] = v;
+  updateCardUI(idx);
+}
+
+function onStatInput(e) {
+  doStatUpdate(e.target);
+}
+
+function onStatBlur(e) {
   renderEditorGrid();
+}
+
+function onStatUp(e) {
+  const btn = e.target;
+  const idx = parseInt(btn.dataset.idx);
+  const stat = btn.dataset.stat;
+  const c = editorChars[idx];
+  if (c[stat] >= 100) return;
+  c[stat]++;
+  const input = btn.closest('.ec-field-stat').querySelector('.ec-stat');
+  input.value = c[stat];
+  updateCardUI(idx);
+}
+
+function onStatDn(e) {
+  const btn = e.target;
+  const idx = parseInt(btn.dataset.idx);
+  const stat = btn.dataset.stat;
+  const c = editorChars[idx];
+  if (c[stat] <= 0) return;
+  c[stat]--;
+  const input = btn.closest('.ec-field-stat').querySelector('.ec-stat');
+  input.value = c[stat];
+  updateCardUI(idx);
 }
 
 function onSelectChange(e) {
@@ -1370,6 +2122,10 @@ async function resetAllEdits() {
   }
 }
 
+function nextMusic() {
+  MusicManager.next();
+}
+
 function toggleMusic() {
   const enabled = MusicManager.toggle();
   const bgmBtn = document.getElementById('bgmBtn');
@@ -1417,7 +2173,8 @@ function openSettings() {
 })();
 
 async function startSinglePlayer() {
-  const includeCustom = confirm('本局对战是否加入自建武将？\n\n选择「确定」：自建武将将加入卡池\n选择「取消」：仅使用预设武将');
+  const includeCustom = await askCustomGenerals();
+  if (includeCustom === null) return;
   MusicManager.play('menu');
   document.getElementById('mainMenu').style.display = 'none';
   document.getElementById('gameHeader').style.display = 'flex';
@@ -1429,6 +2186,7 @@ async function startSinglePlayer() {
     const data = await api.newGame({ include_custom_generals: includeCustom });
     gameId = data.game_id;
     applyStateFromServer(data);
+    MusicManager.play('battle');
   } catch (e) {
     addBattleLog('连接服务器失败：' + e.message, 'lose');
     setPhase('⚠ 无法连接服务器');
@@ -1483,6 +2241,41 @@ function openCustomEditor(editId) {
     el.addEventListener('input', clamp);
     el.addEventListener('blur', clamp);
   });
+  // Draggable stat bars
+  document.querySelectorAll('#customEditorOverlay .cg-stat-bar').forEach(bar => {
+    const fill = bar.querySelector('.cg-stat-fill');
+    const inputId = bar.id.replace('Bar', '');
+    const input = document.getElementById(inputId);
+    function setValFromEvent(e) {
+      const rect = bar.getBoundingClientRect();
+      const x = (e.clientX || e.touches?.[0]?.clientX || 0) - rect.left;
+      const v = Math.round(Math.max(1, Math.min(100, (x / rect.width) * 100)));
+      input.value = v;
+      fill.style.width = v + '%';
+      updateCgTotal();
+      enforceCgTypeConstraint();
+      updateCgPreview();
+    }
+    function onDown(e) {
+      e.preventDefault();
+      fill.style.transition = 'none';
+      setValFromEvent(e);
+      const onMove = e2 => { setValFromEvent(e2); };
+      const onUp = () => {
+        fill.style.transition = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, {passive:true});
+      document.addEventListener('touchend', onUp);
+    }
+    bar.addEventListener('mousedown', onDown);
+    bar.addEventListener('touchstart', onDown, {passive:false});
+  });
   document.getElementById('cgName').addEventListener('input', updateCgPreview);
   document.querySelectorAll('#customEditorOverlay .cg-stat, #cgType, #cgFaction').forEach(el => {
     el.addEventListener('change', updateCgPreview);
@@ -1531,12 +2324,21 @@ function updateSelectedAvatar() {
   img.src = `portraits/${cgSelectedAvatar}.webp`;
 }
 
+function updateCgStatBars() {
+  const map = { cgLead:'cgBarLead', cgMar:'cgBarMar', cgInt:'cgBarInt', cgPol:'cgBarPol' };
+  Object.entries(map).forEach(([inputId, barId]) => {
+    const v = parseInt(document.getElementById(inputId).value) || 0;
+    document.getElementById(barId).querySelector('.cg-stat-fill').style.width = v + '%';
+  });
+}
+
 function updateCgTotal() {
   const ld = parseInt(document.getElementById('cgLead').value) || 0;
   const mr = parseInt(document.getElementById('cgMar').value) || 0;
   const it = parseInt(document.getElementById('cgInt').value) || 0;
   const po = parseInt(document.getElementById('cgPol').value) || 0;
   document.getElementById('cgTotal').textContent = `总分 ${ld + mr + it + po}`;
+  updateCgStatBars();
 }
 
 function enforceCgTypeConstraint() {
@@ -1592,6 +2394,7 @@ async function loadCustomGeneralForEdit(id) {
     cgSelectedAvatar = g.avatarId || 501;
     renderAvatarGrid();
     updateCgTotal();
+    updateCgStatBars();
     enforceCgTypeConstraint();
     updateCgPreview();
   } catch (e) {

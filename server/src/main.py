@@ -8,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from .routes.game import router as game_router
+from .routes.room import router as room_router
 
 # Register MIME types that Python's mimetypes doesn't know or gets wrong
 mimetypes.add_type('image/webp', '.webp')
@@ -33,6 +34,7 @@ app.add_middleware(
 )
 
 app.include_router(game_router, prefix="/api")
+app.include_router(room_router, prefix="/api")
 
 music_dir = os.path.join(os.path.dirname(__file__), 'data', 'music')
 if os.path.isdir(music_dir):

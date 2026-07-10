@@ -78,7 +78,7 @@ let round = 0, gamePhase = 'idle', drawPileCount = 100, placedThisTurn = 0;
 let player = { collection: [], board: Array(64).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
 let ai = { collection: [], board: Array(64).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
 let selectedChar = null, selectedCell = null;
-let playerCatFilter = 'all', aiCatFilter = 'all', playerSortBy = 'default', editorSortBy = 'id';
+let playerCatFilter = 'all', aiCatFilter = 'all', playerSortBy = 'default', aiSortBy = 'default', editorSortBy = 'id';
 let avatarCache = {};
 let playerCooldowns = [], aiCooldowns = [];
 let autoPlay = false;
@@ -163,8 +163,8 @@ function applyStateFromServer(data) {
     setTimeout(() => showVictory(s.winner), 500);
     if (autoPlay) toggleAutoPlay();
     MusicManager.play(s.winner ? 'victory' : 'defeat');
-  } else if (gamePhase === 'draw' || gamePhase === 'pick_card') {
-    if (!mpGameId && gamePhase === 'draw') setTimeout(() => { if (gamePhase==='draw' && !_isAutoPlaying) drawPhase(); }, 100);
+  } else if (gamePhase === 'idle' || gamePhase === 'draw' || gamePhase === 'pick_card') {
+    if (!mpGameId && (gamePhase === 'idle' || gamePhase === 'draw')) setTimeout(() => { if ((gamePhase==='idle'||gamePhase==='draw') && !_isAutoPlaying) drawPhase(); }, 100);
   } else if (gamePhase === 'place_player' && !mpGameId) {
     setPhase('🏯 放置你的部队');
   }
@@ -180,23 +180,19 @@ function applyStateFromServer(data) {
 
 function updateButtonStates() {
   if (mpGameId) {
-    const btnDraw = document.getElementById('btnDraw');
     const btnEnd = document.getElementById('btnEndTurn');
     document.getElementById('btnAutoOneRound').disabled = true;
     document.getElementById('btnAutoPerm').disabled = true;
     if (gamePhase === 'gameover') {
-      btnDraw.disabled = btnEnd.disabled = true;
+      btnEnd.disabled = true;
     } else if (mpIsHost) {
-      btnDraw.disabled = gamePhase !== 'multiplayer_draw_host' && gamePhase !== 'multiplayer_pick_host' && gamePhase !== 'idle';
       btnEnd.disabled = gamePhase !== 'place_player';
     } else {
-      btnDraw.disabled = gamePhase !== 'multiplayer_draw_guest' && gamePhase !== 'multiplayer_pick_guest';
       btnEnd.disabled = gamePhase !== 'place_guest';
     }
     return;
   }
   if (gamePhase === 'gameover') {
-    document.getElementById('btnDraw').disabled = true;
     document.getElementById('btnEndTurn').disabled = true;
     document.getElementById('btnAutoOneRound').disabled = true;
     document.getElementById('btnAutoPerm').disabled = true;
@@ -209,7 +205,6 @@ function updateButtonStates() {
     document.getElementById('btnAutoOneRound').disabled = false;
     document.getElementById('btnAutoPerm').disabled = false;
   } else {
-    document.getElementById('btnDraw').disabled = true;
     document.getElementById('btnEndTurn').disabled = true;
     document.getElementById('btnAutoOneRound').disabled = true;
     document.getElementById('btnAutoPerm').disabled = true;
@@ -603,6 +598,10 @@ function updateCollectionGrid() {
   const empty = document.getElementById('emptyTip');
   const my = isGuestView() ? ai : player;
   const otherBoard = isGuestView() ? player.board : ai.board;
+  const myBoard = isGuestView() ? ai.board : player.board;
+  const total = my.collection ? my.collection.length : 0;
+  const deployed = myBoard.filter(u => u !== null).length;
+  document.getElementById('playerDeployCount').textContent = `（${deployed}/${total-deployed}）`;
   const myCooldowns = isGuestView() ? aiCooldowns : playerCooldowns;
   const myCatFilter = isGuestView() ? aiCatFilter : playerCatFilter;
   const mySortBy = isGuestView() ? aiSortBy : playerSortBy;
@@ -680,6 +679,9 @@ function updateAiCollectionGrid() {
   const el = document.getElementById('aiCollectionGrid');
   const empty = document.getElementById('aiEmptyTip');
   const enemy = isGuestView() ? player : ai;
+  const total = enemy.collection ? enemy.collection.length : 0;
+  const deployed = enemy.board.filter(u => u !== null).length;
+  document.getElementById('aiDeployCount').textContent = `（${deployed}/${total-deployed}）`;
   const enemyCooldowns = isGuestView() ? playerCooldowns : aiCooldowns;
   const enemyCatFilter = isGuestView() ? playerCatFilter : aiCatFilter;
   if (!enemy.collection || !enemy.collection.length) { el.innerHTML=''; empty.style.display='block'; return; }
@@ -1613,7 +1615,7 @@ async function loadMultiplayerGame() {
 
 // ==================== MULTIPLAYER TURN LOGIC ====================
 async function handleHostTurn() {
-  if (gamePhase === 'multiplayer_draw_host' || gamePhase === 'multiplayer_pick_host') {
+  if (gamePhase === 'multiplayer_draw_host' || gamePhase === 'multiplayer_pick_host' || gamePhase === 'idle') {
     await drawPhase();
     // drawPhase shows pick modal which starts its own timer; no fallback needed here
   } else if (gamePhase === 'place_player') {
@@ -2197,6 +2199,7 @@ async function startSinglePlayer() {
 let cgSelectedAvatar = 501;
 let cgEditingId = null; // null = new creation
 let cgFromList = false; // opened from listCustomGenerals
+let cgSelectedId = null; // selected card id in listCustomGenerals
 
 function openCustomEditor(editId) {
   openEditor();
@@ -2285,7 +2288,7 @@ function openCustomEditor(editId) {
 function closeCustomEditor() {
   document.getElementById('customEditorOverlay').classList.remove('show');
   if (cgFromList) {
-    document.getElementById('editorOverlay').classList.add('show');
+    listCustomGenerals();
   } else {
     document.getElementById('mainMenu').style.display = 'flex';
   }
@@ -2487,24 +2490,34 @@ async function listCustomGenerals() {
     const ov = document.getElementById('editorOverlay');
     ov.classList.add('show');
     const grid = document.getElementById('editorGrid');
-    grid.innerHTML = `<div style="font-size:12px;color:#888;padding:4px 8px">点击武将进行编辑</div>`;
+    cgSelectedId = null;
+    grid.innerHTML = `<div style="font-size:12px;color:#888;padding:4px 8px">选择武将后点击「更改武将」编辑或「删除武将」移除</div>`;
     grid.innerHTML += list.map(g => {
       const total = (g.leadership||0)+(g.martial||0)+(g.intelligence||0)+(g.politics||0);
-      return `<div class="ec-card" style="cursor:pointer" onclick="openCustomEditor(${g.id})">
+      const cf = g.faction || '群雄';
+      const cfColor = FACTION_COLORS[cf] || '#888';
+      const cfs = (g.factions && g.factions.length) ? g.factions : (g.faction ? [g.faction] : ['群雄']);
+      return `<div class="ec-card" style="cursor:pointer" onclick="selectCgCard(${g.id})" data-cgid="${g.id}">
         <div class="ec-id">#${g.id}</div>
-        <div class="ec-avatar-row"><img class="ec-avatar" src="${generateAvatar({id:g.avatarId||g.id,name:g.name,rating:g.rating||'C',type:g.type||'全能'}, 48)}"></div>
+        <div class="ec-avatar-row"><img class="ec-avatar" src="${generateAvatar({id:g.avatarId||g.id,name:g.name,rating:g.rating||'C',type:g.type||'全能'}, 64)}"></div>
         <div class="ec-name-static">${escHtml(g.name)}</div>
         <div class="ec-field"><span class="ec-label">类</span><span>${g.type||'全能'}</span></div>
+        <div class="ec-field"><span class="ec-label">评</span><span class="ec-rating-static" style="color:${RATING_COLORS[g.rating]||'#ccc'}">${g.rating||'C'}</span></div>
+        <div class="ec-field"><span class="ec-label">势</span><span style="color:${cfColor}">${cf}</span><span style="font-size:8px;color:#888;margin-left:2px">${cfs.map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('/')}</span></div>
         <div class="ec-field"><span class="ec-label">身份</span><span style="color:#f5a623">${g.identity||'非大名'}</span></div>
-        <div class="ec-field"><span class="ec-label">评</span><span style="color:${RATING_COLORS[g.rating]||'#ccc'}">${g.rating||'C'}</span></div>
-        <div style="font-size:10px;color:#888;margin-top:4px">统${g.leadership} 武${g.martial} 智${g.intelligence} 政${g.politics}</div>
-        <div style="font-size:9px;color:#4fc3f7">总分 ${total}</div>
+        <div class="ec-field ec-field-stat"><span class="ec-label">统</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.leadership||0}%;background:#e94560"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.leadership||0}</span></div>
+        <div class="ec-field ec-field-stat"><span class="ec-label">武</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.martial||0}%;background:#f5a623"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.martial||0}</span></div>
+        <div class="ec-field ec-field-stat"><span class="ec-label">智</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.intelligence||0}%;background:#2ecc71"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.intelligence||0}</span></div>
+        <div class="ec-field ec-field-stat"><span class="ec-label">政</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.politics||0}%;background:#3498db"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.politics||0}</span></div>
+        <div class="ec-total">总分 ${total}</div>
       </div>`;
     }).join('');
-    // Add a close button to the editor header
+    // Add action buttons to the editor header
     const hdr = document.querySelector('#editorOverlay .editor-hdr');
     hdr.innerHTML = `<h2>📝 编辑自建武将</h2>
       <div class="editor-hdr-btns">
+        <button class="btn btn-outline btn-small" onclick="editSelectedCg()" id="btnEditCg" disabled style="opacity:.4">更改武将</button>
+        <button class="btn btn-outline btn-small" onclick="deleteSelectedCg()" id="btnDeleteCg" disabled style="opacity:.4">删除武将</button>
         <button class="btn btn-outline btn-small" onclick="closeCharEditor()">返回</button>
       </div>`;
   } catch (e) {
@@ -2512,6 +2525,55 @@ async function listCustomGenerals() {
   }
 }
 
+function selectCgCard(id) {
+  if (cgSelectedId === id) { cgSelectedId = null; }
+  else { cgSelectedId = id; }
+  document.querySelectorAll('#editorGrid .ec-card').forEach(el => {
+    const match = el.dataset.cgid == cgSelectedId;
+    el.style.borderColor = match ? '#4fc3f7' : '';
+    el.style.boxShadow = match ? '0 0 8px rgba(79,195,247,.5)' : '';
+  });
+  const btnEdit = document.getElementById('btnEditCg');
+  const btnDel = document.getElementById('btnDeleteCg');
+  const disabled = !cgSelectedId;
+  btnEdit.disabled = disabled;
+  btnDel.disabled = disabled;
+  btnEdit.style.opacity = disabled ? '.4' : '1';
+  btnDel.style.opacity = disabled ? '.4' : '1';
+}
+function editSelectedCg() {
+  if (!cgSelectedId) return;
+  openCustomEditor(cgSelectedId);
+}
+async function deleteSelectedCg() {
+  if (!cgSelectedId) return;
+  // Find name for confirmation message
+  const card = document.querySelector(`#editorGrid .ec-card[data-cgid="${cgSelectedId}"]`);
+  const name = card ? card.querySelector('.ec-name-static').textContent : '#' + cgSelectedId;
+  if (!confirm(`确定要删除武将「${name}」吗？\n此操作不可撤销。`)) return;
+  try {
+    const r = await fetch('/api/characters/custom');
+    const d = await r.json();
+    const list = d.generals || [];
+    const idx = list.findIndex(x => x.id === cgSelectedId);
+    if (idx >= 0) list.splice(idx, 1);
+    const r2 = await fetch('/api/characters/custom/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({generals: list})
+    });
+    const res = await r2.json();
+    if (res.ok) {
+      showToast(`已删除武将「${name}」`);
+      cgSelectedId = null;
+      listCustomGenerals();
+    } else {
+      showToast('删除失败', 'error');
+    }
+  } catch (e) {
+    showToast('删除失败: ' + e.message, 'error');
+  }
+}
 function showToast(msg, type) {
   if (!window._toast) { window._toast = document.createElement('div'); window._toast.className = 'toast-msg'; document.body.appendChild(window._toast); }
   window._toast.style.background = type === 'error' ? 'rgba(233,69,96,.9)' : 'rgba(46,204,113,.9)';

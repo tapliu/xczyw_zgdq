@@ -254,6 +254,7 @@ header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webk
 .editor-grid::-webkit-scrollbar-thumb{background:#e94560;border-radius:2px}
 .ec-card{background:#12122e;border:1px solid #222255;border-radius:6px;padding:8px;text-align:center}
 .ec-card.ec-changed{border-color:#f5a623;box-shadow:0 0 6px rgba(245,166,35,.3)}
+.ec-card.selected{border-color:#4fc3f7;box-shadow:0 0 8px rgba(79,195,247,.5)}
 .ec-id{font-size:9px;color:#555;text-align:left;margin-bottom:2px}
 .ec-avatar-row{margin-bottom:4px}
 .ec-avatar{width:64px;height:64px;border-radius:50%;border:2px solid #555}

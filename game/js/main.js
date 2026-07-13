@@ -1340,6 +1340,18 @@ async function setTerrain(mode) {
 // ==================== CREATE ROOM MODAL ====================
 let _crmTerrain = 'normal';
 
+function askCustomGenerals() {
+  return new Promise(resolve => {
+    const modal = document.getElementById('customGenModal');
+    modal.classList.add('show');
+    const yesBtn = document.getElementById('cgmYes');
+    const noBtn = document.getElementById('cgmNo');
+    const cleanup = () => modal.classList.remove('show');
+    yesBtn.onclick = () => { cleanup(); resolve(true); };
+    noBtn.onclick = () => { cleanup(); resolve(false); };
+  });
+}
+
 function selectCrmTerrain(mode) {
   _crmTerrain = mode;
   ['normal','nagashino','tennozan'].forEach(m => {

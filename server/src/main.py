@@ -56,8 +56,8 @@ static_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'game')
 if os.path.isdir(static_dir):
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
 
-# if __name__ == "__main__":
-#     uvicorn.run("server.src.main:app", host="127.0.0.1", port=8000, reload=True)
-
 if __name__ == "__main__":
-    uvicorn.run("server.src.main:app", host="0.0.0.0", port=8000)
+    uvicorn.run("server.src.main:app", host="127.0.0.1", port=8000, reload=True)
+#
+# if __name__ == "__main__":
+#     uvicorn.run("server.src.main:app", host="0.0.0.0", port=8000)

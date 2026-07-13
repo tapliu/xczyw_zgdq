@@ -425,10 +425,17 @@ class GameState:
     def _recalc_ratings(chars):
         splus = set()
         for c in chars:
-            if c.get('leadership') == 100 or c.get('martial') == 100 or c.get('intelligence') == 100 or c.get('politics') == 100:
+            ld = c.get('orig_leadership') or c.get('leadership') or 0
+            mr = c.get('orig_martial') or c.get('martial') or 0
+            it = c.get('orig_intelligence') or c.get('intelligence') or 0
+            po = c.get('orig_politics') or c.get('politics') or 0
+            if ld == 100 or mr == 100 or it == 100 or po == 100:
                 splus.add(c['id'])
         rest = [c for c in chars if c['id'] not in splus]
-        rest.sort(key=lambda c: -(c.get('leadership',0) + c.get('martial',0) + c.get('intelligence',0) + c.get('politics',0)))
+        rest.sort(key=lambda c: -((c.get('orig_leadership') or c.get('leadership') or 0)
+                                 + (c.get('orig_martial') or c.get('martial') or 0)
+                                 + (c.get('orig_intelligence') or c.get('intelligence') or 0)
+                                 + (c.get('orig_politics') or c.get('politics') or 0)))
         n = len(rest)
         tiers = [(1/11, 'S'), (3/11, 'A'), (5/11, 'B'), (8/11, 'C'), (1, 'D')]
         for i, c in enumerate(rest):

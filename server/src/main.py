@@ -2,8 +2,11 @@ import os
 import mimetypes
 import uvicorn
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -22,6 +25,15 @@ class CacheMiddleware(BaseHTTPMiddleware):
         return response
 
 app = FastAPI(title="战国夺旗")
+
+
+@app.exception_handler(RequestValidationError)
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(request: Request, exc):
+    errors = exc.errors() if hasattr(exc, 'errors') else [{'msg': str(exc)}]
+    detail = '; '.join(e['msg'] for e in errors)
+    return JSONResponse(status_code=422, content={'detail': detail})
+
 
 app.add_middleware(CacheMiddleware)
 
@@ -44,5 +56,8 @@ static_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'game')
 if os.path.isdir(static_dir):
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
 
+# if __name__ == "__main__":
+#     uvicorn.run("server.src.main:app", host="127.0.0.1", port=8000, reload=True)
+
 if __name__ == "__main__":
-    uvicorn.run("server.src.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("server.src.main:app", host="0.0.0.0", port=8000)

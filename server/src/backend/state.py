@@ -807,6 +807,7 @@ class GameState:
                     raise ValueError('请至少放置一名武将')
 
         if self.multiplayer:
+            self.placed_this_turn = 0
             self.game_phase = 'place_guest'
             self._log('等待对手放置', 'info')
         else:
@@ -945,8 +946,8 @@ class GameState:
                     self._log(f'对手旗帜部署至 {cell}', 'flag')
                     break
 
+        self._pin_from_placement(cell, False)
         if self._is_adjacent_to_enemy(cell, False):
-            self._pin_unit(cell, False)
             self._log(f'对手 {char["name"]} 部署至 {cell}（与敌方邻接，被钉住）', 'info')
         else:
             self._log(f'对手 {char["name"]} 部署至 {cell}', 'info')

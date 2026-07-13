@@ -5,7 +5,7 @@ const api = {
     const opts = { method, headers: {} };
     if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     const res = await fetch(API_BASE + path, opts);
-    if (!res.ok) { const err = await res.json().catch(() => ({detail: res.statusText})); throw new Error(err.detail || 'API Error'); }
+    if (!res.ok) { const err = await res.json().catch(() => ({detail: res.statusText})); const msg = err.detail || 'API Error'; throw new Error(`[${res.status}] ${msg}`); }
     return res.json();
   },
   newGame(body) { return this.request('POST', '/api/game/new', body); },
@@ -25,6 +25,7 @@ const api = {
   roomReady(body) { return this.request('POST', '/api/room/ready', body); },
   roomList() { return this.request('GET', '/api/room/list'); },
   roomStatus(body) { return this.request('POST', '/api/room/status', body); },
+  roomSetTerrain(body) { return this.request('POST', '/api/room/terrain', body); },
   // Guest multiplayer endpoints
   drawOptionsGuest(gameId) { return this.request('POST', `/api/game/${gameId}/draw-options-guest`); },
   pickCardGuest(gameId, charId) { return this.request('POST', `/api/game/${gameId}/pick-card-guest`, {char_id: charId}); },

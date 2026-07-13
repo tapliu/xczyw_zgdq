@@ -14,6 +14,7 @@ class Room:
         self.countdown = 0
         self.host_ready = False
         self.guest_ready = False
+        self.terrain = 'normal'
 
     @property
     def has_guest(self):
@@ -32,6 +33,7 @@ class Room:
             'use_custom_generals': self.use_custom_generals,
             'host_ready': self.host_ready,
             'guest_ready': self.guest_ready,
+            'terrain': self.terrain,
         }
 
 
@@ -39,11 +41,13 @@ _rooms: dict[str, Room] = {}
 _lock = threading.Lock()
 
 
-def create_room(use_custom_generals: bool) -> tuple[str, str]:
+def create_room(use_custom_generals: bool, terrain: str = 'normal') -> tuple[str, str]:
     room_id = str(uuid.uuid4())[:8]
     host_token = str(uuid.uuid4())
     with _lock:
-        _rooms[room_id] = Room(room_id, host_token, use_custom_generals)
+        room = Room(room_id, host_token, use_custom_generals)
+        room.terrain = terrain
+        _rooms[room_id] = room
     return room_id, host_token
 
 
@@ -109,6 +113,7 @@ def start_game(room_id: str, host_token: str) -> Optional[str]:
         game = GameState(game_id)
         game.multiplayer = True
         game.reset_game(include_custom_generals=room.use_custom_generals)
+        game.set_terrain(room.terrain)
         # reset_game already called _init_draw_sequence(); multiplayer flag ensures host/guest roles
         game._log('多人对战开始', 'info')
 
@@ -118,6 +123,21 @@ def start_game(room_id: str, host_token: str) -> Optional[str]:
         room.game_id = game_id
         room.status = 'playing'
     return game_id
+
+
+def set_room_terrain(room_id: str, token: str, terrain: str) -> bool:
+    if terrain not in ('normal', 'nagashino', 'tennozan'):
+        return False
+    with _lock:
+        room = _rooms.get(room_id)
+        if not room:
+            return False
+        if room.host_token != token:
+            return False
+        if room.status != 'waiting':
+            return False
+        room.terrain = terrain
+    return True
 
 
 def list_rooms() -> list[dict]:

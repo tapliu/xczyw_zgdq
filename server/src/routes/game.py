@@ -1,5 +1,5 @@
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from ..backend.state import GameState, edited_characters
@@ -16,7 +16,7 @@ class PlaceRequest(BaseModel):
 
 
 class TerrainRequest(BaseModel):
-    terrain: str
+    terrain: Literal['normal', 'nagashino', 'tennozan']
 
 
 class PickCardRequest(BaseModel):

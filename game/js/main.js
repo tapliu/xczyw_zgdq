@@ -1018,6 +1018,7 @@ async function drawPhase() {
   } catch (e) {
     addBattleLog('抽卡失败：' + e.message, 'lose');
     quickDrawMode = false;
+    if (mpGameId && e.message.includes('Game not found')) { goBackToRoomList(); return; }
   }
 }
 
@@ -1025,10 +1026,13 @@ function quickDrawPhase() {
   quickDrawMode = true;
   document.getElementById('pickAutoBtn').disabled = true;
   document.getElementById('pickQuickBtn').disabled = true;
-  if (gamePhase === 'pick_card') {
+  if (gamePhase === 'pick_card' || gamePhase === 'multiplayer_pick_host' || gamePhase === 'multiplayer_pick_guest') {
     autoPickCard();
-  } else {
+  } else if (gamePhase === 'multiplayer_draw_host' && mpIsHost) {
     drawPhase();
+  } else {
+    document.getElementById('pickAutoBtn').disabled = false;
+    document.getElementById('pickQuickBtn').disabled = false;
   }
 }
 
@@ -1122,6 +1126,7 @@ async function pickCard(charId) {
     if (qb) qb.disabled = false;
     const ab = document.getElementById('pickAutoBtn');
     if (ab) ab.disabled = false;
+    if (mpGameId && e.message.includes('Game not found')) { goBackToRoomList(); return; }
   }
 }
 
@@ -1332,16 +1337,34 @@ async function setTerrain(mode) {
   renderBoardFull();
 }
 
-// ==================== CUSTOM GENERAL MODAL ====================
-function askCustomGenerals() {
+// ==================== CREATE ROOM MODAL ====================
+let _crmTerrain = 'normal';
+
+function selectCrmTerrain(mode) {
+  _crmTerrain = mode;
+  ['normal','nagashino','tennozan'].forEach(m => {
+    const el = document.getElementById('crmTerrain' + m.charAt(0).toUpperCase() + m.slice(1));
+    if (el) el.className = 'btn btn-xs btn-outline' + (m === mode ? ' active' : '');
+  });
+}
+
+function askRoomOptions() {
+  _crmTerrain = 'normal';
   return new Promise(resolve => {
-    const modal = document.getElementById('customGenModal');
+    const modal = document.getElementById('createRoomModal');
     modal.classList.add('show');
-    const yesBtn = document.getElementById('cgmYes');
-    const noBtn = document.getElementById('cgmNo');
+    document.getElementById('crmTerrainNormal').className = 'btn btn-xs btn-outline active';
+    document.getElementById('crmTerrainNagashino').className = 'btn btn-xs btn-outline';
+    document.getElementById('crmTerrainTennozan').className = 'btn btn-xs btn-outline';
+    const confirmBtn = document.getElementById('crmConfirm');
+    const cancelBtn = document.getElementById('crmCancel');
     const cleanup = () => modal.classList.remove('show');
-    yesBtn.onclick = () => { cleanup(); resolve(true); };
-    noBtn.onclick = () => { cleanup(); resolve(false); };
+    confirmBtn.onclick = () => {
+      const useCustom = document.getElementById('crmUseCustom').checked;
+      cleanup();
+      resolve({ use_custom_generals: useCustom, terrain: _crmTerrain });
+    };
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
   });
 }
 
@@ -1373,10 +1396,12 @@ async function refreshRoomList() {
       container.innerHTML = '<div class="room-empty">暂无可用房间，点击上方创建</div>';
       return;
     }
-    let html = '<table class="room-table"><thead><tr><th>房间号</th><th>自定义武将</th><th>状态</th><th></th></tr></thead><tbody>';
+    const terrainLabel = { normal:'普通', nagashino:'长篠', tennozan:'天王山' };
+    let html = '<table class="room-table"><thead><tr><th>房间号</th><th>自建武将</th><th>地图</th><th>状态</th><th></th></tr></thead><tbody>';
     rooms.forEach(r => {
       html += `<tr><td style="font-family:monospace;font-size:15px;letter-spacing:1px;color:#f5a623">${r.room_id}</td>`
         + `<td style="color:#888;font-size:12px">${r.use_custom_generals ? '是' : '否'}</td>`
+        + `<td style="color:#aaa;font-size:12px">${terrainLabel[r.terrain] || '普通'}</td>`
         + `<td style="color:#4fc3f7">等待中</td>`
         + `<td><button class="btn btn-small btn-outline" onclick="joinRoom('${r.room_id}')">加入</button></td></tr>`;
     });
@@ -1388,10 +1413,10 @@ async function refreshRoomList() {
 }
 
 async function createRoom() {
-  const useCustom = await askCustomGenerals();
-  if (useCustom === null) return;
+  const opts = await askRoomOptions();
+  if (!opts) return;
   try {
-    const data = await api.roomCreate({ use_custom_generals: useCustom });
+    const data = await api.roomCreate({ use_custom_generals: opts.use_custom_generals, terrain: opts.terrain });
     mpRoomId = data.room_id;
     mpToken = data.host_token;
     mpIsHost = true;
@@ -1469,6 +1494,7 @@ function showLobby() {
   document.getElementById('lobbyReadyBtn').style.display = 'none';
   document.getElementById('lobbyStartBtn').style.display = 'none';
   document.getElementById('lobbyCgCards').innerHTML = '';
+  document.getElementById('lobbyTerrainDisplay').style.display = 'none';
   document.getElementById('lobbyWaiting').style.display = 'block';
   if (mpIsHost) {
     document.getElementById('lobbyHostLabel').textContent = '你 (房主)';
@@ -1568,6 +1594,12 @@ function pollLobbyRoomState(data) {
     cgStatusEl.textContent = '未加入自建武将';
     cgStatusEl.style.color = '#888';
   }
+  // Terrain display
+  const terrainNames = { normal:'普通对战', tennozan:'天王山之战', nagashino:'长篠之战' };
+  if (data.terrain) {
+    document.getElementById('lobbyTerrainDisplay').textContent = '🗺️ ' + (terrainNames[data.terrain] || data.terrain);
+    document.getElementById('lobbyTerrainDisplay').style.display = 'block';
+  }
 }
 
 async function pollLobby() {
@@ -1610,12 +1642,28 @@ async function loadMultiplayerGame() {
     }
   } catch (e) {
     addBattleLog('加载游戏失败：' + e.message, 'lose');
+    if (e.message.includes('Game not found') || e.message.includes('404')) {
+      alert('游戏已失效（服务器可能已重启），返回大厅');
+      goBackToRoomList();
+    }
   }
+}
+
+function goBackToRoomList() {
+  clearDrawTimer();
+  if (mpPollTimer) { clearInterval(mpPollTimer); mpPollTimer = null; }
+  mpGameId = null; mpToken = null; mpIsHost = false; mpGameId = null; _cgLoaded = false;
+  document.getElementById('lobbyOverlay').classList.remove('show');
+  document.getElementById('gameHeader').style.display = 'none';
+  document.getElementById('gameContent').style.display = 'none';
+  document.getElementById('mainMenu').style.display = 'none';
+  document.getElementById('roomOverlay').classList.add('show');
+  refreshRoomList();
 }
 
 // ==================== MULTIPLAYER TURN LOGIC ====================
 async function handleHostTurn() {
-  if (gamePhase === 'multiplayer_draw_host' || gamePhase === 'multiplayer_pick_host' || gamePhase === 'idle') {
+  if (gamePhase === 'multiplayer_draw_host' || gamePhase === 'multiplayer_pick_host' || gamePhase === 'idle' || gamePhase === 'draw') {
     await drawPhase();
     // drawPhase shows pick modal which starts its own timer; no fallback needed here
   } else if (gamePhase === 'place_player') {
@@ -1655,6 +1703,7 @@ async function pollHostTurn() {
     applyStateFromServer(data);
     handleHostTurn();
   } catch (e) {
+    if (e.message.includes('Game not found')) { goBackToRoomList(); return; }
     setTimeout(pollHostTurn, 1000);
   }
 }
@@ -1673,7 +1722,7 @@ async function handleGuestTurn() {
     setPhase('⏳ 等待对方放置...');
     updateButtonStates();
     setTimeout(pollGuestTurn, 1000);
-  } else if (gamePhase === 'idle') {
+  } else if (gamePhase === 'idle' || gamePhase === 'draw') {
     setPhase('⏳ 等待对方抽卡...');
     setTimeout(pollGuestTurn, 1000);
   } else if (gamePhase === 'gameover') {
@@ -1692,6 +1741,7 @@ async function pollGuestTurn() {
     applyStateFromServer(data);
     handleGuestTurn();
   } catch (e) {
+    if (e.message.includes('Game not found')) { goBackToRoomList(); return; }
     setTimeout(pollGuestTurn, 1000);
   }
 }
@@ -1709,9 +1759,16 @@ async function drawPhaseGuest() {
         }
       });
       showPickModalGuest(data.options);
+      if (quickDrawMode) {
+        setTimeout(() => {
+          autoPickCard();
+          if (gamePhase !== 'multiplayer_pick_guest') quickDrawMode = false;
+        }, 60);
+      }
     }
   } catch (e) {
     addBattleLog('抽卡失败：' + e.message, 'lose');
+    if (e.message.includes('Game not found')) { goBackToRoomList(); return; }
     setTimeout(pollGuestTurn, 1000);
   }
 }
@@ -1756,10 +1813,21 @@ async function pickCardGuest(charId) {
     if (gamePhase === 'multiplayer_pick_guest') {
       await drawPhaseGuest();
     } else {
+      quickDrawMode = false;
+      const qb = document.getElementById('pickQuickBtn');
+      if (qb) qb.disabled = false;
+      const ab = document.getElementById('pickAutoBtn');
+      if (ab) ab.disabled = false;
       handleGuestTurn();
     }
   } catch (e) {
     addBattleLog('选卡失败：' + e.message, 'lose');
+    quickDrawMode = false;
+    const qb = document.getElementById('pickQuickBtn');
+    if (qb) qb.disabled = false;
+    const ab = document.getElementById('pickAutoBtn');
+    if (ab) ab.disabled = false;
+    if (e.message.includes('Game not found')) { goBackToRoomList(); return; }
   }
 }
 

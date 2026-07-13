@@ -1,15 +1,19 @@
+from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from ..backend.room import (
     create_room, join_room, leave_room, set_ready, start_game,
-    list_rooms, get_room, verify_room_access
+    list_rooms, get_room, verify_room_access, set_room_terrain
 )
 
 router = APIRouter(prefix='/room')
 
+Terrain = Literal['normal', 'nagashino', 'tennozan']
+
 
 class CreateRoomRequest(BaseModel):
     use_custom_generals: bool = True
+    terrain: Terrain = 'normal'
 
 
 class JoinRoomRequest(BaseModel):
@@ -32,9 +36,15 @@ class RoomActionRequest(BaseModel):
     token: str
 
 
+class SetTerrainRequest(BaseModel):
+    room_id: str
+    token: str
+    terrain: Terrain
+
+
 @router.post('/create')
 def api_create_room(body: CreateRoomRequest):
-    room_id, host_token = create_room(body.use_custom_generals)
+    room_id, host_token = create_room(body.use_custom_generals, body.terrain)
     return {'room_id': room_id, 'host_token': host_token}
 
 
@@ -81,3 +91,11 @@ def api_room_status(body: RoomActionRequest):
     if not room:
         raise HTTPException(status_code=403, detail='无权访问')
     return room.to_dict()
+
+
+@router.post('/terrain')
+def api_set_terrain(body: SetTerrainRequest):
+    ok = set_room_terrain(body.room_id, body.token, body.terrain)
+    if not ok:
+        raise HTTPException(status_code=400, detail='设置地形失败')
+    return {'ok': True}

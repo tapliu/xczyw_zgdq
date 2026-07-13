@@ -421,6 +421,27 @@ class GameState:
             best = max(('leadership','martial','intelligence','politics'), key=lambda k: c.get(k,0))
             c[best] = round(c.get(best,0) * 1.10)
 
+    @staticmethod
+    def _recalc_ratings(chars):
+        splus = set()
+        for c in chars:
+            if c.get('leadership') == 100 or c.get('martial') == 100 or c.get('intelligence') == 100 or c.get('politics') == 100:
+                splus.add(c['id'])
+        rest = [c for c in chars if c['id'] not in splus]
+        rest.sort(key=lambda c: -(c.get('leadership',0) + c.get('martial',0) + c.get('intelligence',0) + c.get('politics',0)))
+        n = len(rest)
+        tiers = [(1/11, 'S'), (3/11, 'A'), (5/11, 'B'), (8/11, 'C'), (1, 'D')]
+        for i, c in enumerate(rest):
+            pct = i / n if n > 0 else 1
+            c['rating'] = 'D'
+            for thr, tier in tiers:
+                if pct < thr:
+                    c['rating'] = tier
+                    break
+        for c in chars:
+            if c['id'] in splus:
+                c['rating'] = 'S+'
+
     def reset_game(self, include_custom_generals=True):
         all_chars = load_characters()
         # Attach default faction info from relation data (before edits, so edits can override)
@@ -441,6 +462,8 @@ class GameState:
         # Apply type-based stat multipliers
         for c in all_chars:
             self._apply_type_bonus(c)
+        # Recalculate ratings so static data errors don't propagate into gameplay
+        self._recalc_ratings(all_chars)
         # Add custom generals to the pool (if enabled)
         all_game_chars = list(all_chars)
         if include_custom_generals:
@@ -456,6 +479,7 @@ class GameState:
                         cg_copy['lord_name'] = lord
                 self._apply_type_bonus(cg_copy)
                 all_game_chars.append(cg_copy)
+        self._recalc_ratings(all_game_chars)
         self.draw_pile = []
         self.spectator_pool = [deepcopy(c) for c in all_game_chars]
         shuffle(self.spectator_pool)

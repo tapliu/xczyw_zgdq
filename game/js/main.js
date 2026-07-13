@@ -2554,45 +2554,69 @@ async function saveCustomGeneral() {
   }
 }
 
+let _cgList = [];
+let _cgSortBy = 'id';
+
+function renderCgList() {
+  cgSelectedId = null;
+  const grid = document.getElementById('editorGrid');
+  const sorted = [..._cgList].sort((a, b) => {
+    if (_cgSortBy === 'id') return a.id - b.id;
+    if (_cgSortBy === 'name') return (a.name||'').localeCompare(b.name||'');
+    if (_cgSortBy === 'faction') { const fa = a.faction||'群雄', fb = b.faction||'群雄'; return fa.localeCompare(fb) || a.id - b.id; }
+    return (b[_cgSortBy]||0) - (a[_cgSortBy]||0);
+  });
+  grid.innerHTML = `<div style="font-size:12px;color:#888;padding:4px 8px">选择武将后点击「更改武将」编辑或「删除武将」移除</div>`;
+  grid.innerHTML += sorted.map(g => {
+    const total = (g.leadership||0)+(g.martial||0)+(g.intelligence||0)+(g.politics||0);
+    const cf = g.faction || '群雄';
+    const cfColor = FACTION_COLORS[cf] || '#888';
+    const cfs = (g.factions && g.factions.length) ? g.factions : (g.faction ? [g.faction] : ['群雄']);
+    return `<div class="ec-card" style="cursor:pointer" onclick="selectCgCard(${g.id})" data-cgid="${g.id}">
+      <div class="ec-id">#${g.id}</div>
+      <div class="ec-avatar-row"><img class="ec-avatar" src="${generateAvatar({id:g.avatarId||g.id,name:g.name,rating:g.rating||'C',type:g.type||'全能'}, 64)}"></div>
+      <div class="ec-name-static">${escHtml(g.name)}</div>
+      <div class="ec-field"><span class="ec-label">类</span><span>${g.type||'全能'}</span></div>
+      <div class="ec-field"><span class="ec-label">评</span><span class="ec-rating-static" style="color:${RATING_COLORS[g.rating]||'#ccc'}">${g.rating||'C'}</span></div>
+      <div class="ec-field"><span class="ec-label">势</span><span style="color:${cfColor}">${cf}</span><span style="font-size:8px;color:#888;margin-left:2px">${cfs.map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('/')}</span></div>
+      <div class="ec-field"><span class="ec-label">身份</span><span style="color:#f5a623">${g.identity||'非大名'}</span></div>
+      <div class="ec-field ec-field-stat"><span class="ec-label">统</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.leadership||0}%;background:#e94560"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.leadership||0}</span></div>
+      <div class="ec-field ec-field-stat"><span class="ec-label">武</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.martial||0}%;background:#f5a623"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.martial||0}</span></div>
+      <div class="ec-field ec-field-stat"><span class="ec-label">智</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.intelligence||0}%;background:#2ecc71"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.intelligence||0}</span></div>
+      <div class="ec-field ec-field-stat"><span class="ec-label">政</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.politics||0}%;background:#3498db"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.politics||0}</span></div>
+      <div class="ec-total">总分 ${total}</div>
+    </div>`;
+  }).join('');
+  const btnEdit = document.getElementById('btnEditCg');
+  const btnDel = document.getElementById('btnDeleteCg');
+  if (btnEdit) { btnEdit.disabled = true; btnEdit.style.opacity = '.4'; }
+  if (btnDel) { btnDel.disabled = true; btnDel.style.opacity = '.4'; }
+}
+
 async function listCustomGenerals() {
   openEditor();
   document.getElementById('mainMenu').style.display = 'none';
   try {
     const r = await fetch('/api/characters/custom');
     const d = await r.json();
-    const list = d.generals || [];
-    if (list.length === 0) {
+    _cgList = d.generals || [];
+    if (_cgList.length === 0) {
       showToast('暂无自建武将，请先创建');
       document.getElementById('mainMenu').style.display = 'flex';
       return;
     }
-    // Show a simple selection overlay (reuse existing overlay approach)
     const ov = document.getElementById('editorOverlay');
     ov.classList.add('show');
-    const grid = document.getElementById('editorGrid');
-    cgSelectedId = null;
-    grid.innerHTML = `<div style="font-size:12px;color:#888;padding:4px 8px">选择武将后点击「更改武将」编辑或「删除武将」移除</div>`;
-    grid.innerHTML += list.map(g => {
-      const total = (g.leadership||0)+(g.martial||0)+(g.intelligence||0)+(g.politics||0);
-      const cf = g.faction || '群雄';
-      const cfColor = FACTION_COLORS[cf] || '#888';
-      const cfs = (g.factions && g.factions.length) ? g.factions : (g.faction ? [g.faction] : ['群雄']);
-      return `<div class="ec-card" style="cursor:pointer" onclick="selectCgCard(${g.id})" data-cgid="${g.id}">
-        <div class="ec-id">#${g.id}</div>
-        <div class="ec-avatar-row"><img class="ec-avatar" src="${generateAvatar({id:g.avatarId||g.id,name:g.name,rating:g.rating||'C',type:g.type||'全能'}, 64)}"></div>
-        <div class="ec-name-static">${escHtml(g.name)}</div>
-        <div class="ec-field"><span class="ec-label">类</span><span>${g.type||'全能'}</span></div>
-        <div class="ec-field"><span class="ec-label">评</span><span class="ec-rating-static" style="color:${RATING_COLORS[g.rating]||'#ccc'}">${g.rating||'C'}</span></div>
-        <div class="ec-field"><span class="ec-label">势</span><span style="color:${cfColor}">${cf}</span><span style="font-size:8px;color:#888;margin-left:2px">${cfs.map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('/')}</span></div>
-        <div class="ec-field"><span class="ec-label">身份</span><span style="color:#f5a623">${g.identity||'非大名'}</span></div>
-        <div class="ec-field ec-field-stat"><span class="ec-label">统</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.leadership||0}%;background:#e94560"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.leadership||0}</span></div>
-        <div class="ec-field ec-field-stat"><span class="ec-label">武</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.martial||0}%;background:#f5a623"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.martial||0}</span></div>
-        <div class="ec-field ec-field-stat"><span class="ec-label">智</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.intelligence||0}%;background:#2ecc71"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.intelligence||0}</span></div>
-        <div class="ec-field ec-field-stat"><span class="ec-label">政</span><div class="ec-stat-bar"><div class="ec-stat-fill" style="width:${g.politics||0}%;background:#3498db"></div></div><span style="font-size:10px;color:#ddd;min-width:16px;text-align:center">${g.politics||0}</span></div>
-        <div class="ec-total">总分 ${total}</div>
-      </div>`;
-    }).join('');
-    // Add action buttons to the editor header
+    _cgSortBy = 'id';
+    document.querySelectorAll('#editorSortBar .sort-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#editorSortBar .sort-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        _cgSortBy = btn.dataset.sort;
+        renderCgList();
+      });
+    });
+    renderCgList();
     const hdr = document.querySelector('#editorOverlay .editor-hdr');
     hdr.innerHTML = `<h2>📝 编辑自建武将</h2>
       <div class="editor-hdr-btns">

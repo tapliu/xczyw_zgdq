@@ -39,22 +39,19 @@
       <button class="menu-btn" onclick="listCustomGenerals()"><span class="menu-icon">📝</span> 编辑自建武将</button>
       <button class="menu-btn quit" onclick="closeEditor()" style="border-color:#555"><span class="menu-icon">🔙</span> 返回主菜单</button>
     </div>
-    <div class="menu-footer">Powered by FastAPI · 战国风云 <span class="version-badge">v0.0.7</span></div>
+    <div class="menu-footer">Powered by FastAPI · 战国风云 <span class="version-badge">v0.0.8</span></div>
   </div>
 </div>
 
 <header style="display:none" id="gameHeader">
 <h1>⚔ 信长之野望-战国夺旗</h1>
-<div class="terrain-select">
-<button class="btn btn-xs btn-outline active" id="btnTerrainNormal" onclick="setTerrain('normal')">普通</button>
-<button class="btn btn-xs btn-outline" id="btnTerrainNagashino" onclick="setTerrain('nagashino')">长篠</button>
-<button class="btn btn-xs btn-outline" id="btnTerrainTennozan" onclick="setTerrain('tennozan')">天王山</button>
-</div>
+<div class="terrain-display" id="terrainDisplay">当前战场：普通</div>
+<span id="mpPlaceTimer" style="font-size:12px;color:#e94560;font-weight:700;margin-left:8px;display:none"></span>
 <div class="header-info">
 <span class="stat">回合 <b class="round-display" id="roundDisplay">0</b></span>
 <span class="stat">📦 牌堆 <b id="drawPileCount">100</b></span>
-<span class="stat">🔵 己方  <b class="troop-display player" id="playerTroops">50000</b><span class="inc-tag" id="pIncome">+0/回合</span></span>
-<span class="stat">🔴 敌方  <b class="troop-display ai" id="aiTroops">50000</b><span class="inc-tag" id="aIncome">+0/回合</span></span>
+<span class="stat">🔵 己方后备  <b class="troop-display player" id="playerTroops">50000</b><span class="inc-tag" id="pIncome">+0/回合</span></span>
+<span class="stat">🔴 敌方后备  <b class="troop-display ai" id="aiTroops">50000</b><span class="inc-tag" id="aIncome">+0/回合</span></span>
 </div>
 </header>
 
@@ -137,12 +134,24 @@
 </div>
 </div>
 
-<div id="customGenModal" class="troop-modal"><div class="modal" style="max-width:360px;text-align:center;padding:24px">
+<div id="spOptionsModal" class="troop-modal"><div class="modal" style="max-width:420px;text-align:center;padding:24px">
   <h2 style="margin-bottom:16px">⚔ 单人模式</h2>
-  <div style="margin-bottom:18px;font-size:14px;color:#ccc">是否使用自建武将？</div>
+  <div style="margin-bottom:16px">
+    <label style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-size:14px;color:#ccc">
+      <input type="checkbox" id="spUseCustom" checked> 使用自建武将
+    </label>
+  </div>
+  <div style="margin-bottom:18px">
+    <div style="font-size:12px;color:#888;margin-bottom:8px">选择地图</div>
+    <div style="display:flex;gap:8px;justify-content:center">
+      <button class="btn btn-xs btn-outline active" id="spTerrainNormal" onclick="selectSpTerrain('normal')">普通</button>
+      <button class="btn btn-xs btn-outline" id="spTerrainNagashino" onclick="selectSpTerrain('nagashino')">长篠</button>
+      <button class="btn btn-xs btn-outline" id="spTerrainTennozan" onclick="selectSpTerrain('tennozan')">天王山</button>
+    </div>
+  </div>
   <div style="display:flex;gap:12px;justify-content:center">
-    <button class="btn btn-gold" id="cgmYes">使用</button>
-    <button class="btn btn-outline" id="cgmNo">不使用</button>
+    <button class="btn btn-gold" id="spConfirm">开始游戏</button>
+    <button class="btn btn-outline" id="spCancel">取消</button>
   </div>
 </div></div>
 
@@ -171,7 +180,7 @@
 
 <script src="js/music.js"></script>
 <script src="js/api.js"></script>
-<script src="js/main.js?v=3"></script>
+<script src="js/main.js?v=4"></script>
 <script>
 // Populate faction dropdowns at page load
 (function(){

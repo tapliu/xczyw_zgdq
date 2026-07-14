@@ -131,7 +131,7 @@ def calc_battle(p_unit, a_unit, p_power, a_power, ratio, p_flag_idx=-1, a_flag_i
 def calc_ranged_damage(attacker, defender, atk_power, def_power):
     total = atk_power + def_power
     intel_factor = attacker['char']['intelligence'] / 100
-    dmg = round(attacker['troops'] * (atk_power / total) * intel_factor * 0.25)
+    dmg = round(attacker['troops'] * (atk_power / total) * intel_factor * 0.20)
     return max(1, dmg)
 
 

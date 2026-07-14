@@ -127,6 +127,11 @@ class GameState:
         self.multiplayer = False
         self._draw_seq = []
         self._draw_seq_idx = 0
+        self.host_placement_ready = False
+        self.guest_placement_ready = False
+        self.guest_placed_this_turn = 0
+        self.initial_host_board_uids = []
+        self.initial_ai_board_uids = []
 
     def _log(self, msg, typ='info'):
         self.battle_log.append({'msg': msg, 'type': typ})
@@ -199,10 +204,7 @@ class GameState:
                 nf = nu.char.get('faction', '')
                 if nf and nf in u_factions:
                     faction_bonus += 0.03 if has_qunxiong else 0.05
-            eu = en_board[ni]
-            if eu:
-                ef = eu.char.get('faction', '')
-                if ef and any(relations.is_hostile(uf, ef) for uf in u_factions):
+                elif nf and any(relations.is_hostile(uf, nf) for uf in u_factions):
                     faction_bonus -= 0.05
         power += u.char['leadership'] * flag_mul * 0.05
         for ei in range(64):
@@ -213,14 +215,18 @@ class GameState:
             if index in cone:
                 power -= eu.char['intelligence'] * 0.03
         power *= faction_bonus
-        # Lord bonus: if this unit is the lord, each friendly same-faction unit on board adds 5%
+        # Lord bonus: each same-faction ally on board adds 5%
         is_lord = u.char.get('lord_name') == u.char.get('name')
-        if is_lord and not has_qunxiong:
+        if is_lord:
             faction_count = 0
             for i in range(64):
                 fu = my_board[i]
-                if fu and fu is not u and fu.char.get('faction') in u_factions:
-                    faction_count += 1
+                if fu and fu is not u:
+                    ff = fu.char.get('factions') or []
+                    if not ff:
+                        ff = [fu.char.get('faction', '')]
+                    if any(f in u_factions for f in ff):
+                        faction_count += 1
             power *= (1 + faction_count * 0.05)
         # No flag on board → all units fight at 80%
         if side.flag_idx == -1:
@@ -246,7 +252,7 @@ class GameState:
     def _calc_ranged_damage(self, attacker, defender, atk_power, def_power):
         total = atk_power + def_power
         intel_factor = attacker.char['intelligence'] / 100
-        dmg = round(attacker.troops * (atk_power / total) * intel_factor * 0.20) if total > 0 else 1
+        dmg = round(attacker.troops * (atk_power / total) * intel_factor * 0.15) if total > 0 else 1
         return max(1, dmg)
 
     def _has_adjacent_enemy(self, idx, is_player):
@@ -509,6 +515,10 @@ class GameState:
         self._pending_draw_options = None
         self.pending_picks = 0
         self.pending_flag_picks = 0
+        self.host_placement_ready = False
+        self.guest_placement_ready = False
+        self.initial_host_board_uids = []
+        self.initial_ai_board_uids = []
         self._init_draw_sequence()
         self._log('初始抽卡：先选旗本武将，再选普通武将', 'info')
 
@@ -666,8 +676,17 @@ class GameState:
             a_inc = self._decay_income(self.ai)
             self.player.troops += pi
             self.ai.troops += a_inc
-            self.game_phase = 'place_player'
-            self._log(f'第1回合 · 各获{pi}/{a_inc}兵力，请部署', 'info')
+            if self.multiplayer:
+                self.host_placement_ready = False
+                self.guest_placement_ready = False
+                self.guest_placed_this_turn = 0
+                self.initial_host_board_uids = [u.uid for u in self.player.board if u]
+                self.initial_ai_board_uids = [u.uid for u in self.ai.board if u]
+                self.game_phase = 'multiplayer_place'
+                self._log(f'第1回合 · 各获{pi}/{a_inc}兵力，请双方部署', 'info')
+            else:
+                self.game_phase = 'place_player'
+                self._log(f'第1回合 · 各获{pi}/{a_inc}兵力，请部署', 'info')
         else:
             self.round += 1
             self.placed_this_turn = 0
@@ -677,9 +696,19 @@ class GameState:
                 a_inc = self._decay_income(self.ai)
                 self.player.troops += pi
                 self.ai.troops += a_inc
-            self.game_phase = 'place_player'
-            income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
-            self._log(f'第{self.round}回合 · 抽牌完成{income_str}，请部署', 'info')
+            if self.multiplayer:
+                self.host_placement_ready = False
+                self.guest_placement_ready = False
+                self.guest_placed_this_turn = 0
+                self.initial_host_board_uids = [u.uid for u in self.player.board if u]
+                self.initial_ai_board_uids = [u.uid for u in self.ai.board if u]
+                self.game_phase = 'multiplayer_place'
+                income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
+                self._log(f'第{self.round}回合 · 抽牌完成{income_str}，请双方部署', 'info')
+            else:
+                self.game_phase = 'place_player'
+                income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
+                self._log(f'第{self.round}回合 · 抽牌完成{income_str}，请部署', 'info')
 
     # ---- Draw options (human side: player / host) ----
     def draw_options(self):
@@ -764,7 +793,7 @@ class GameState:
         self._handle_step_complete()
 
     def place_unit(self, char_id, cell, troops):
-        if self.game_phase != 'place_player':
+        if self.game_phase not in ('place_player', 'multiplayer_place'):
             raise ValueError('不在放置阶段')
         if self.placed_this_turn >= PLACE_PER_ROUND:
             raise ValueError('本回合放置次数已用完')
@@ -823,7 +852,7 @@ class GameState:
             self._log(f'放置 {char["name"]}', 'win')
 
     def end_placement(self):
-        if self.game_phase != 'place_player':
+        if self.game_phase not in ('place_player', 'multiplayer_place'):
             raise ValueError('不在放置阶段')
         if not any(self.player.board[i] and self.player.flag_idx == i for i in range(64) if self.player.board[i]):
             unlocked = [fg for fg in self.player.flag_generals if fg['id'] not in self.player.locked_flag_ids]
@@ -838,6 +867,13 @@ class GameState:
                     raise ValueError('请至少放置一名武将')
 
         if self.multiplayer:
+            if self.game_phase == 'multiplayer_place':
+                self.host_placement_ready = True
+                self._log('你已完成放置，等待对方...', 'info')
+                if self.host_placement_ready and self.guest_placement_ready:
+                    self._log('双方放置完成！', 'info')
+                    self._advance_phase()
+                return
             self.placed_this_turn = 0
             self.game_phase = 'place_guest'
             self._log('等待对手放置', 'info')
@@ -924,9 +960,10 @@ class GameState:
 
     def place_unit_guest(self, char_id, cell, troops):
         """Player 2 places a unit on the ai side."""
-        if self.game_phase != 'place_guest':
+        if self.game_phase not in ('place_guest', 'multiplayer_place'):
             raise ValueError('不在对手放置阶段')
-        if self.placed_this_turn >= PLACE_PER_ROUND:
+        max_placed = PLACE_PER_ROUND - (self.placed_this_turn if self.game_phase == 'place_guest' else self.guest_placed_this_turn)
+        if max_placed <= 0:
             raise ValueError('本回合放置次数已用完')
         if not (0 <= cell < 64):
             raise ValueError('无效格子')
@@ -964,7 +1001,10 @@ class GameState:
         unit = Unit(char, troops, uid)
         self.ai.board[cell] = unit
         self.ai.troops -= troops
-        self.placed_this_turn += 1
+        if self.game_phase == 'multiplayer_place':
+            self.guest_placed_this_turn += 1
+        else:
+            self.placed_this_turn += 1
         self.uid_char_map[uid] = deepcopy(char)
         self.uid_side_map[uid] = 'ai'
 
@@ -985,7 +1025,7 @@ class GameState:
 
     def end_placement_guest(self):
         """Player 2 (guest) ends their placement phase, triggering battle."""
-        if self.game_phase != 'place_guest':
+        if self.game_phase not in ('place_guest', 'multiplayer_place'):
             raise ValueError('不在放置阶段')
         if not any(self.ai.board[i] and self.ai.flag_idx == i for i in range(64) if self.ai.board[i]):
             unlocked = [fg for fg in self.ai.flag_generals if fg['id'] not in self.ai.locked_flag_ids]
@@ -999,6 +1039,13 @@ class GameState:
                 if not any(u for u in self.ai.board if u):
                     raise ValueError('请至少放置一名武将')
 
+        if self.multiplayer and self.game_phase == 'multiplayer_place':
+            self.guest_placement_ready = True
+            self._log('你已完成放置，等待对方...', 'info')
+            if self.host_placement_ready and self.guest_placement_ready:
+                self._log('双方放置完成！', 'info')
+                self._advance_phase()
+            return
         self._end_ai_place()
 
     def _is_adjacent_to_enemy(self, cell, is_player):
@@ -1057,7 +1104,7 @@ class GameState:
                  and not self._is_dead(c['id'])]
         avail.sort(key=lambda c: RATING_ORDER.get(c.get('rating', ''), 9))
 
-        max_units = 10 if self.terrain_mode == 'tennozan' else (16 if self.terrain_mode == 'nagashino' else 20)
+        max_units = 8 if self.terrain_mode == 'tennozan' else (12 if self.terrain_mode == 'nagashino' else 16)
         remain_slots = max_units - len([u for u in side.board if u])
         to_place = min(max_place, len(avail), remain_slots)
         if to_place == 0:
@@ -1154,8 +1201,31 @@ class GameState:
     def _surviving_count(self, side):
         return sum(1 for c in side.collection if not self._is_dead(c['id']))
 
+    def auto_place_my_side(self, is_host):
+        if self.game_phase != 'multiplayer_place':
+            raise ValueError('不在多人放置阶段')
+        if is_host:
+            prev = len([u for u in self.player.board if u])
+            self._auto_place_side(self.player, self.player.collection, PLAYER_ROWS, True, PLACE_PER_ROUND - self.placed_this_turn)
+            placed = len([u for u in self.player.board if u]) - prev
+            if placed > 0:
+                self.placed_this_turn += placed
+            self.host_placement_ready = True
+            self._log(f'你已完成托管放置{placed}名武将，等待对方...', 'info')
+        else:
+            prev = len([u for u in self.ai.board if u])
+            self._auto_place_side(self.ai, self.ai.collection, AI_ROWS, False, PLACE_PER_ROUND - self.guest_placed_this_turn)
+            placed = len([u for u in self.ai.board if u]) - prev
+            if placed > 0:
+                self.guest_placed_this_turn += placed
+            self.guest_placement_ready = True
+            self._log(f'你已完成托管放置{placed}名武将，等待对方...', 'info')
+        if self.host_placement_ready and self.guest_placement_ready:
+            self._log('双方放置完成！', 'info')
+            self._advance_phase()
+
     def auto_place_remaining(self):
-        if self.game_phase != 'place_player':
+        if self.game_phase not in ('place_player', 'multiplayer_place'):
             raise ValueError('不在放置阶段')
         prev_count = len([u for u in self.player.board if u])
         self._auto_place_side(self.player, self.player.collection, PLAYER_ROWS, True, PLACE_PER_ROUND - self.placed_this_turn)
@@ -1163,6 +1233,13 @@ class GameState:
         if placed > 0:
             self.placed_this_turn += placed
             self._log(f'自动放置{placed}名武将', 'info')
+        if self.multiplayer:
+            self._auto_place_side(self.ai, self.ai.collection, AI_ROWS, False, PLACE_PER_ROUND - self.guest_placed_this_turn)
+            self.host_placement_ready = True
+            self.guest_placement_ready = True
+            self._log('双方托管放置完成', 'info')
+            self._advance_phase()
+            return
         self._ai_placement()
         self._end_ai_place()
 
@@ -1810,9 +1887,19 @@ class GameState:
                 a_inc = self._decay_income(self.ai)
                 self.player.troops += pi
                 self.ai.troops += a_inc
-            self.game_phase = 'place_player'
-            income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
-            self._log(f'第{self.round}回合 · 抽牌封顶{income_str}，请部署', 'info')
+            if self.multiplayer:
+                self.host_placement_ready = False
+                self.guest_placement_ready = False
+                self.guest_placed_this_turn = 0
+                self.initial_host_board_uids = [u.uid for u in self.player.board if u]
+                self.initial_ai_board_uids = [u.uid for u in self.ai.board if u]
+                self.game_phase = 'multiplayer_place'
+                income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
+                self._log(f'第{self.round}回合 · 抽牌封顶{income_str}，请双方部署', 'info')
+            else:
+                self.game_phase = 'place_player'
+                income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
+                self._log(f'第{self.round}回合 · 抽牌封顶{income_str}，请部署', 'info')
         else:
             self.game_phase = 'draw'
             self.placed_this_turn = 0
@@ -1856,4 +1943,8 @@ class GameState:
             'pending_flag_picks': self.pending_flag_picks,
             'multiplayer': self.multiplayer,
             'pending_draw_options': self._pending_draw_options,
+            'host_placement_ready': self.host_placement_ready,
+            'guest_placement_ready': self.guest_placement_ready,
+            'initial_host_board_uids': self.initial_host_board_uids,
+            'initial_ai_board_uids': self.initial_ai_board_uids,
         }

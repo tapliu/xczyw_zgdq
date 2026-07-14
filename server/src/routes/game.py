@@ -15,6 +15,9 @@ class PlaceRequest(BaseModel):
     troops: int
 
 
+class AutoPlaceMySideRequest(BaseModel):
+    is_host: bool
+
 class TerrainRequest(BaseModel):
     terrain: Literal['normal', 'nagashino', 'tennozan']
 
@@ -32,6 +35,7 @@ def get_game_or_404(game_id: str):
 
 class NewGameRequest(BaseModel):
     include_custom_generals: bool = True
+    terrain: str = 'normal'
 
 @router.post('/game/new')
 def new_game(body: NewGameRequest = None):
@@ -39,6 +43,8 @@ def new_game(body: NewGameRequest = None):
     game = GameState(game_id)
     include_custom = body.include_custom_generals if body else True
     game.reset_game(include_custom_generals=include_custom)
+    if body:
+        game.set_terrain(body.terrain)
     games[game_id] = game
     return {'game_id': game_id, 'state': game.to_dict()}
 
@@ -88,7 +94,7 @@ def pick_card_guest(game_id: str, body: PickCardRequest):
 @router.post('/game/{game_id}/place-guest')
 def place_guest(game_id: str, body: PlaceRequest):
     game = get_game_or_404(game_id)
-    if game.game_phase != 'place_guest':
+    if game.game_phase not in ('place_guest', 'multiplayer_place'):
         raise HTTPException(status_code=400, detail='不在对手放置阶段')
     try:
         game.place_unit_guest(body.char_id, body.cell, body.troops)
@@ -100,7 +106,7 @@ def place_guest(game_id: str, body: PlaceRequest):
 @router.post('/game/{game_id}/end-placement-guest')
 def end_placement_guest(game_id: str):
     game = get_game_or_404(game_id)
-    if game.game_phase != 'place_guest':
+    if game.game_phase not in ('place_guest', 'multiplayer_place'):
         raise HTTPException(status_code=400, detail='不在对手放置阶段')
     try:
         game.end_placement_guest()
@@ -136,7 +142,7 @@ def place_unit(game_id: str, body: PlaceRequest):
 @router.post('/game/{game_id}/end-turn')
 def end_turn(game_id: str):
     game = get_game_or_404(game_id)
-    if game.game_phase != 'place_player':
+    if game.game_phase not in ('place_player', 'multiplayer_place'):
         raise HTTPException(status_code=400, detail='不在放置阶段')
     try:
         game.end_placement()
@@ -152,6 +158,28 @@ def auto_place(game_id: str):
     game = get_game_or_404(game_id)
     try:
         game.auto_place_remaining()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/auto-place-mp')
+def auto_place_mp(game_id: str):
+    game = get_game_or_404(game_id)
+    if not game.multiplayer:
+        raise HTTPException(status_code=400, detail='仅限多人模式')
+    try:
+        game.auto_place_remaining()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/auto-place-my-side')
+def auto_place_my_side(game_id: str, body: AutoPlaceMySideRequest):
+    game = get_game_or_404(game_id)
+    try:
+        game.auto_place_my_side(body.is_host)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return game.to_dict()

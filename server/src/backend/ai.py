@@ -29,7 +29,7 @@ def auto_place_side(side, collection, rows, is_player, max_place=PLACE_PER_ROUND
 
     avail.sort(key=lambda c: rating_order.get(c['rating'], 9))
 
-    max_units = max_units_func() if max_units_func else 20
+    max_units = max_units_func() if max_units_func else 16
     remain_slots = max_units - len([u for u in side['board'] if u is not None])
     to_place = min(max_place, len(avail), remain_slots)
     if to_place <= 0:

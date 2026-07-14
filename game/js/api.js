@@ -31,4 +31,6 @@ const api = {
   pickCardGuest(gameId, charId) { return this.request('POST', `/api/game/${gameId}/pick-card-guest`, {char_id: charId}); },
   placeGuest(gameId, charId, cell, troops) { return this.request('POST', `/api/game/${gameId}/place-guest`, {char_id: charId, cell, troops}); },
   endPlacementGuest(gameId) { return this.request('POST', `/api/game/${gameId}/end-placement-guest`); },
+  autoPlaceMp(gameId) { return this.request('POST', `/api/game/${gameId}/auto-place-mp`); },
+  autoPlaceMySide(gameId, isHost) { return this.request('POST', `/api/game/${gameId}/auto-place-my-side`, { is_host: isHost }); },
 };

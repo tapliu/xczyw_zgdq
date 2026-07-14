@@ -20,8 +20,7 @@ body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#0a0a18;colo
 .menu-footer{position:fixed;bottom:24px;right:24px;font-size:15px;color:#ccc;letter-spacing:1px;padding:10px 18px;background:rgba(255,255,255,.06);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1);border-radius:10px;z-index:100}
 .menu-footer .version-badge{display:inline-block;font-size:12px;color:#e94560;background:rgba(233,69,96,.2);padding:1px 8px;border-radius:4px;margin-left:6px;letter-spacing:0;font-weight:600}
 header{background:linear-gradient(135deg,#16213e,#0f3460);padding:8px 12px 8px 16px;display:flex;align-items:center;gap:10px;border-bottom:2px solid #e94560;flex-wrap:wrap}
-header .terrain-select{display:flex;gap:3px;margin-left:8px}
-header .terrain-select .btn{padding:2px 6px;font-size:10px}
+header .terrain-display{font-size:12px;color:#888;margin-left:8px;padding:2px 0}
 header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webkit-background-clip:text;-webkit-text-fill-color:transparent;white-space:nowrap}
 .header-info{display:flex;gap:8px 16px;font-size:12px;color:#ccc;flex-wrap:wrap;align-items:center}
 .header-info .stat{display:flex;align-items:center;gap:3px;background:#111128;padding:2px 8px;border-radius:4px;border:1px solid #1a1a3e}

@@ -1278,6 +1278,8 @@ function toggleAutoPlay() {
     document.getElementById('btnAutoOneRound').disabled = true;
     document.getElementById('btnEndTurn').disabled = true;
     if (!mpGameId) runAutoPlay();
+    else if (mpIsHost) handleHostTurn();
+    else handleGuestTurn();
   } else {
     _isAutoPlaying = false;
     document.getElementById('btnAutoPerm').textContent = '一键托管';

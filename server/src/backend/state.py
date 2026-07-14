@@ -148,7 +148,7 @@ class GameState:
         elif self.terrain_mode == 'nagashino':
             r = idx // 8
             c = idx % 8
-            if r in (3, 4) and c not in (1, 2, 5, 6):
+            if r in (3, 4) and c in (1, 2, 5, 6):
                 return False
             return True
         return True
@@ -1290,11 +1290,22 @@ class GameState:
                 self.ai.board[i].pinned = False
 
         init_troops_by_uid = {}
+        pre_board_units = {}
         for i in range(64):
             if self.player.board[i]:
                 init_troops_by_uid[self.player.board[i].uid] = self.player.board[i].troops
+                pre_board_units[self.player.board[i].uid] = {
+                    'name': self.player.board[i].char['name'],
+                    'char_id': self.player.board[i].char['id'],
+                    'side': '我方'
+                }
             if self.ai.board[i]:
                 init_troops_by_uid[self.ai.board[i].uid] = self.ai.board[i].troops
+                pre_board_units[self.ai.board[i].uid] = {
+                    'name': self.ai.board[i].char['name'],
+                    'char_id': self.ai.board[i].char['id'],
+                    'side': '敌方'
+                }
 
         engaged_p = set()
         engaged_a = set()
@@ -1900,6 +1911,22 @@ class GameState:
                         self.ai.current_flag_char_id = None
                         self.ai.flag_idx = -1
                     brd[i] = None
+
+        current_uids = set()
+        for i in range(64):
+            if self.player.board[i]:
+                current_uids.add(self.player.board[i].uid)
+            if self.ai.board[i]:
+                current_uids.add(self.ai.board[i].uid)
+        for uid, info in pre_board_units.items():
+            if uid not in current_uids:
+                if info['char_id'] in self.dead_list:
+                    reason = '被击杀'
+                elif self.scatter_debuff.get(info['char_id']):
+                    reason = '击溃'
+                else:
+                    reason = '被击败'
+                self._log(f'[离场] {info["side"]}{info["name"]} - {reason}', 'lose')
 
         self._try_recruit_ai()
 

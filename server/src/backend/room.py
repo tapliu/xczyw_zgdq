@@ -112,6 +112,8 @@ def start_game(room_id: str, host_token: str) -> Optional[str]:
         game_id = str(uuid.uuid4())
         game = GameState(game_id)
         game.multiplayer = True
+        game.host_token = room.host_token    # set tokens for WS auth
+        game.guest_token = room.guest_token or ''
         game.reset_game(include_custom_generals=room.use_custom_generals)
         game.set_terrain(room.terrain)
         # reset_game already called _init_draw_sequence(); multiplayer flag ensures host/guest roles

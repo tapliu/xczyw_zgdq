@@ -1779,6 +1779,38 @@ async function loadMultiplayerGame() {
     const data = await api.getState(mpGameId);
     gameId = mpGameId;
     applyStateFromServer(data);
+
+    // Connect WebSocket for real-time updates
+    const role = mpIsHost ? 'host' : 'guest';
+    net.onState = (snapshot, tick, final) => {
+      const prevPhase = gamePhase;
+      applyStateFromServer(snapshot);
+      // If phase changed or we're in battle, re-enter the turn handler
+      if (prevPhase !== gamePhase || gamePhase === 'gameover') {
+        if (mpIsHost) handleHostTurn();
+        else handleGuestTurn();
+      }
+    };
+    net.onPhase = (phase, round, role) => {
+      if (phase !== gamePhase) {
+        // Phase changed via WebSocket—trigger turn handler
+        setTimeout(() => {
+          if (mpIsHost) handleHostTurn();
+          else handleGuestTurn();
+        }, 100);
+      }
+    };
+    net.onConnectionChange = (connected) => {
+      if (connected) {
+        net.joinBattle();
+      }
+    };
+    net.connect(mpGameId, role, mpToken).then(() => {
+      net.joinBattle();
+    }).catch(e => {
+      console.warn('[net] WebSocket connect failed, falling back to HTTP polling', e);
+    });
+
     if (mpIsHost) {
       handleHostTurn();
     } else {
@@ -1794,6 +1826,7 @@ async function loadMultiplayerGame() {
 }
 
 function goBackToRoomList() {
+  net.disconnect();
   clearDrawTimer();
   if (mpPollTimer) { clearInterval(mpPollTimer); mpPollTimer = null; }
   mpGameId = null; mpToken = null; mpIsHost = false; mpGameId = null; _cgLoaded = false;

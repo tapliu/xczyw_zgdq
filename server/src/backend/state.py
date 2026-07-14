@@ -127,6 +127,8 @@ class GameState:
         self.pending_picks = 0
         self.pending_flag_picks = 0
         self.multiplayer = False
+        self.host_token = ''       # multiplayer auth — set when game starts from room
+        self.guest_token = ''      # multiplayer auth — set when game starts from room
         self._draw_seq = []
         self._draw_seq_idx = 0
         self.host_placement_ready = False
@@ -247,6 +249,36 @@ class GameState:
             'pLoss': p_loss, 'aLoss': a_loss,
             'pLossPct': p_loss / (p_unit.troops * ratio) if p_unit.troops * ratio > 0 else 0,
             'aLossPct': a_loss / (a_unit.troops * ratio) if a_unit.troops * ratio > 0 else 0,
+        }
+
+    def resolve_rt_melee(self, unit_uid, target_uid, is_player_attacker):
+        """Real-time melee resolution for input-based combat (Layer 4 validation)."""
+        side = self.player if is_player_attacker else self.ai
+        opp = self.ai if is_player_attacker else self.player
+        attacker = next((u for u in side.board if u and u.uid == unit_uid), None)
+        target = next((u for u in opp.board if u and u.uid == target_uid), None)
+        if not attacker or not target:
+            return None
+
+        a_cell = next(i for i, u in enumerate(side.board) if u and u.uid == unit_uid)
+        t_cell = next(i for i, u in enumerate(opp.board) if u and u.uid == target_uid)
+
+        a_power = self._calc_battle_power(a_cell, is_player_attacker)
+        t_power = self._calc_battle_power(t_cell, not is_player_attacker)
+
+        if is_player_attacker:
+            result = self._calc_battle(attacker, target, a_power, t_power)
+        else:
+            result = self._calc_battle(target, attacker, t_power, a_power)
+
+        attacker.troops = max(0, attacker.troops - result['pLoss'] if is_player_attacker else result['aLoss'])
+        target.troops = max(0, target.troops - result['aLoss'] if is_player_attacker else result['pLoss'])
+
+        return {
+            'attacker_damage': result['pLoss'] if is_player_attacker else result['aLoss'],
+            'target_damage': result['aLoss'] if is_player_attacker else result['pLoss'],
+            'attacker_alive': attacker.troops > 0,
+            'target_alive': target.troops > 0,
         }
 
     def _calc_ranged_damage(self, attacker, defender, atk_power, def_power):

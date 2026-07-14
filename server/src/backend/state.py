@@ -58,11 +58,12 @@ def shuffle(arr):
 
 
 class Unit:
-    def __init__(self, char, troops, uid, pinned=False):
+    def __init__(self, char, troops, uid, pinned=False, is_new_placement=False):
         self.char = deepcopy(char)
         self.troops = troops
         self.uid = uid
         self.pinned = pinned
+        self.is_new_placement = is_new_placement
 
     def to_dict(self):
         return {
@@ -70,6 +71,7 @@ class Unit:
             'troops': self.troops,
             'uid': self.uid,
             'pinned': self.pinned,
+            'is_new_placement': self.is_new_placement,
         }
 
 
@@ -130,8 +132,6 @@ class GameState:
         self.host_placement_ready = False
         self.guest_placement_ready = False
         self.guest_placed_this_turn = 0
-        self.initial_host_board_uids = []
-        self.initial_ai_board_uids = []
 
     def _log(self, msg, typ='info'):
         self.battle_log.append({'msg': msg, 'type': typ})
@@ -517,8 +517,6 @@ class GameState:
         self.pending_flag_picks = 0
         self.host_placement_ready = False
         self.guest_placement_ready = False
-        self.initial_host_board_uids = []
-        self.initial_ai_board_uids = []
         self._init_draw_sequence()
         self._log('初始抽卡：先选旗本武将，再选普通武将', 'info')
 
@@ -680,8 +678,10 @@ class GameState:
                 self.host_placement_ready = False
                 self.guest_placement_ready = False
                 self.guest_placed_this_turn = 0
-                self.initial_host_board_uids = [u.uid for u in self.player.board if u]
-                self.initial_ai_board_uids = [u.uid for u in self.ai.board if u]
+                for u in self.player.board:
+                    if u: u.is_new_placement = False
+                for u in self.ai.board:
+                    if u: u.is_new_placement = False
                 self.game_phase = 'multiplayer_place'
                 self._log(f'第1回合 · 各获{pi}/{a_inc}兵力，请双方部署', 'info')
             else:
@@ -700,8 +700,10 @@ class GameState:
                 self.host_placement_ready = False
                 self.guest_placement_ready = False
                 self.guest_placed_this_turn = 0
-                self.initial_host_board_uids = [u.uid for u in self.player.board if u]
-                self.initial_ai_board_uids = [u.uid for u in self.ai.board if u]
+                for u in self.player.board:
+                    if u: u.is_new_placement = False
+                for u in self.ai.board:
+                    if u: u.is_new_placement = False
                 self.game_phase = 'multiplayer_place'
                 income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
                 self._log(f'第{self.round}回合 · 抽牌完成{income_str}，请双方部署', 'info')
@@ -831,7 +833,7 @@ class GameState:
 
         self.unit_id_counter += 1
         uid = self.unit_id_counter
-        u = Unit(char, troops, uid)
+        u = Unit(char, troops, uid, is_new_placement=True)
         self.player.board[cell] = u
         self.uid_char_map[uid] = char
         self.uid_side_map[uid] = 'player'
@@ -998,7 +1000,7 @@ class GameState:
 
         self.unit_id_counter += 1
         uid = self.unit_id_counter
-        unit = Unit(char, troops, uid)
+        unit = Unit(char, troops, uid, is_new_placement=True)
         self.ai.board[cell] = unit
         self.ai.troops -= troops
         if self.game_phase == 'multiplayer_place':
@@ -1087,7 +1089,7 @@ class GameState:
                     t = max(500, min(max_t, round(best_flag['martial'] * 60 + best_flag['leadership'] * 40)))
                     self.unit_id_counter += 1
                     nuid = self.unit_id_counter
-                    u = Unit(best_flag, t, nuid)
+                    u = Unit(best_flag, t, nuid, is_new_placement=True)
                     side.board[cell] = u
                     self.uid_char_map[nuid] = best_flag
                     self.uid_side_map[nuid] = 'player' if is_player else 'ai'
@@ -1172,7 +1174,7 @@ class GameState:
             t = max(500, min(max_t, round(ch['martial'] * 60 + ch['leadership'] * 40)))
             self.unit_id_counter += 1
             nuid = self.unit_id_counter
-            u = Unit(ch, t, nuid)
+            u = Unit(ch, t, nuid, is_new_placement=True)
             side.board[cell] = u
             self.uid_char_map[nuid] = ch
             self.uid_side_map[nuid] = 'player' if is_player else 'ai'
@@ -1891,8 +1893,10 @@ class GameState:
                 self.host_placement_ready = False
                 self.guest_placement_ready = False
                 self.guest_placed_this_turn = 0
-                self.initial_host_board_uids = [u.uid for u in self.player.board if u]
-                self.initial_ai_board_uids = [u.uid for u in self.ai.board if u]
+                for u in self.player.board:
+                    if u: u.is_new_placement = False
+                for u in self.ai.board:
+                    if u: u.is_new_placement = False
                 self.game_phase = 'multiplayer_place'
                 income_str = f'，各获{pi}/{a_inc}兵力' if self.round > 1 else ''
                 self._log(f'第{self.round}回合 · 抽牌封顶{income_str}，请双方部署', 'info')
@@ -1945,6 +1949,4 @@ class GameState:
             'pending_draw_options': self._pending_draw_options,
             'host_placement_ready': self.host_placement_ready,
             'guest_placement_ready': self.guest_placement_ready,
-            'initial_host_board_uids': self.initial_host_board_uids,
-            'initial_ai_board_uids': self.initial_ai_board_uids,
         }

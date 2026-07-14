@@ -109,8 +109,6 @@ function normalizeSide(obj) {
 
 let mpPlaceTimer = null;
 const MP_PLACE_TIMEOUT = 60;
-let initialHostBoardUids = [];
-let initialAiBoardUids = [];
 
 function applyStateFromServer(data) {
   const s = data.state || data;
@@ -149,8 +147,6 @@ function applyStateFromServer(data) {
   terrainMode = s.terrain_mode ?? s.terrainMode ?? terrainMode;
   s_hostPlacementReady = s.host_placement_ready ?? false;
   s_guestPlacementReady = s.guest_placement_ready ?? false;
-  if (s.initial_host_board_uids !== undefined) initialHostBoardUids = s.initial_host_board_uids;
-  if (s.initial_ai_board_uids !== undefined) initialAiBoardUids = s.initial_ai_board_uids;
   const logs = s.battle_log ?? s.battleLog;
   if (logs && logs.length) {
     logs.forEach(entry => addBattleLog(entry.msg || entry.message, entry.type || 'info'));
@@ -319,8 +315,8 @@ function renderBoardFull() {
     let pu = player.board[di], au = ai.board[di];
     // In simultaneous multiplayer placement, hide only newly placed opponent units
     if (gamePhase === 'multiplayer_place') {
-      if (isGuestView()) { if (pu && !initialHostBoardUids.includes(pu.uid)) pu = null; }
-      else { if (au && !initialAiBoardUids.includes(au.uid)) au = null; }
+      if (isGuestView()) { if (pu && pu.is_new_placement) pu = null; }
+      else { if (au && au.is_new_placement) au = null; }
     }
     const u = pu || au;
     if (u) {

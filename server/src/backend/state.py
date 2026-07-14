@@ -31,7 +31,7 @@ def _make_tennozan():
 def _make_nagashino():
     m = [True] * 64
     for c in range(8):
-        if c not in (1, 2, 5, 6):
+        if c in (1, 2, 5, 6):
             m[3 * 8 + c] = False
             m[4 * 8 + c] = False
     return m
@@ -1323,7 +1323,7 @@ class GameState:
                     for nr, nc in cand:
                         if 0 <= nr < 8 and 0 <= nc < 8:
                             ni = nr * 8 + nc
-                            if self._is_active_cell(ni):
+                            if self._is_active_cell(ni) and not (self.player.board[ni] or self.ai.board[ni]):
                                 candidates.append(ni)
                 u = self.player.board[i]
                 p_desires.append({'idx': i, 'unit': u, 'troops': u.troops, 'power': u.char['martial'] + u.char['leadership'], 'candidates': candidates})
@@ -1335,7 +1335,7 @@ class GameState:
                     for nr, nc in cand:
                         if 0 <= nr < 8 and 0 <= nc < 8:
                             ni = nr * 8 + nc
-                            if self._is_active_cell(ni):
+                            if self._is_active_cell(ni) and not (self.player.board[ni] or self.ai.board[ni]):
                                 candidates.append(ni)
                 u = self.ai.board[i]
                 a_desires.append({'idx': i, 'unit': u, 'troops': u.troops, 'power': u.char['martial'] + u.char['leadership'], 'candidates': candidates})
@@ -1596,9 +1596,53 @@ class GameState:
             p_tag = '优' if p_power > a_power else ('劣' if p_power < a_power else '均')
             a_tag = '优' if a_power > p_power else ('劣' if a_power < p_power else '均')
             if p_alive and a_alive:
-                pu.pinned = True
-                au.pinned = True
-                all_res.append(f'[前对峙] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) ⚔ {an}({a_tag})(损{int(a_loss_pct * 100)}%)')
+                r, c = divmod(i, 8)
+                if p_loss_pct < a_loss_pct:
+                    self.player.board[i] = pu
+                    self.ai.board[i] = None
+                    dr = -1
+                    nr = r + dr
+                    while nr >= 0:
+                        ni = nr * 8 + c
+                        if self._is_active_cell(ni) and not self.player.board[ni] and not self.ai.board[ni]:
+                            self.ai.board[ni] = au
+                            au.pinned = True
+                            break
+                        nr += dr
+                    if nr < 0:
+                        self.ai.board[i] = au
+                        au.pinned = True
+                    all_res.append(f'[前胜] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) 击退 {an}({a_tag})(损{int(a_loss_pct * 100)}%)')
+                elif a_loss_pct < p_loss_pct:
+                    self.ai.board[i] = au
+                    self.player.board[i] = None
+                    dr = 1
+                    nr = r + dr
+                    while nr < 8:
+                        ni = nr * 8 + c
+                        if self._is_active_cell(ni) and not self.player.board[ni] and not self.ai.board[ni]:
+                            self.player.board[ni] = pu
+                            pu.pinned = True
+                            break
+                        nr += dr
+                    if nr >= 8:
+                        self.player.board[i] = pu
+                        pu.pinned = True
+                    all_res.append(f'[前败] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) 被 {an}({a_tag})(损{int(a_loss_pct * 100)}%) 击退')
+                else:
+                    self.ai.board[i] = None
+                    dr = -1
+                    nr = r + dr
+                    while nr >= 0:
+                        ni = nr * 8 + c
+                        if self._is_active_cell(ni) and not self.player.board[ni] and not self.ai.board[ni]:
+                            self.ai.board[ni] = au
+                            break
+                        nr += dr
+                    if nr < 0:
+                        self.ai.board[i] = au
+                    self.player.board[i] = pu
+                    all_res.append(f'[前对峙] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) ⚔ {an}({a_tag})(损{int(a_loss_pct * 100)}%)')
             elif p_alive and not a_alive:
                 all_res.append(f'[前胜] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) 击败 💀{an}')
             elif not p_alive and a_alive:

@@ -23,7 +23,7 @@ const TERRAIN_PATTERNS = {
   })(),
   nagashino: (()=>{
     const m = new Array(64).fill(true);
-    for (let c=0;c<8;c++) { if (c!==1&&c!==2&&c!==5&&c!==6) { m[3*8+c]=false; m[4*8+c]=false; } }
+    for (let c=0;c<8;c++) { if (c===1||c===2||c===5||c===6) { m[3*8+c]=false; m[4*8+c]=false; } }
     return m;
   })()
 };
@@ -195,7 +195,13 @@ function updateButtonStates() {
   const btnPerm = document.getElementById('btnAutoPerm');
   if (mpGameId) {
     if (btnAuto) btnAuto.disabled = gamePhase !== 'multiplayer_place';
-    if (btnPerm) btnPerm.disabled = true;
+    const mpMyPhase =
+      (gamePhase === 'multiplayer_draw_host' && mpIsHost) ||
+      (gamePhase === 'multiplayer_pick_host' && mpIsHost) ||
+      (gamePhase === 'multiplayer_draw_guest' && !mpIsHost) ||
+      (gamePhase === 'multiplayer_pick_guest' && !mpIsHost) ||
+      gamePhase === 'multiplayer_place';
+    if (btnPerm) btnPerm.disabled = gamePhase === 'gameover' || !mpMyPhase;
     if (gamePhase === 'gameover') {
       if (btnEnd) btnEnd.disabled = true;
     } else if (gamePhase === 'multiplayer_place') {
@@ -1118,6 +1124,7 @@ async function autoPlaceMp() {
 }
 
 function showPickModal(options) {
+  if (_isAutoPlaying) return;
   const grid = document.getElementById('pickGrid');
   const isFlagPick = pendingFlagPicks > 0;
   const title = document.querySelector('#pickModal h2');
@@ -1263,7 +1270,6 @@ async function endPlacement() {
 }
 
 function toggleAutoPlay() {
-  if (mpGameId) { alert('多人模式无法使用托管'); return; }
   autoPlay = !autoPlay;
   if (autoPlay) {
     _isAutoPlaying = true;
@@ -1271,7 +1277,7 @@ function toggleAutoPlay() {
     document.getElementById('btnAutoPerm').className = 'btn btn-small active';
     document.getElementById('btnAutoOneRound').disabled = true;
     document.getElementById('btnEndTurn').disabled = true;
-    runAutoPlay();
+    if (!mpGameId) runAutoPlay();
   } else {
     _isAutoPlaying = false;
     document.getElementById('btnAutoPerm').textContent = '一键托管';
@@ -1800,14 +1806,49 @@ function goBackToRoomList() {
 }
 
 // ==================== MULTIPLAYER TURN LOGIC ====================
+async function autoMpDrawPick() {
+  const gid = mpGameId;
+  let phase = gamePhase;
+  while (_isAutoPlaying && (
+    phase === 'multiplayer_draw_host' || phase === 'multiplayer_pick_host' ||
+    phase === 'multiplayer_draw_guest' || phase === 'multiplayer_pick_guest'
+  )) {
+    const data = mpIsHost ? await api.drawOptions(gid) : await api.drawOptionsGuest(gid);
+    applyStateFromServer(data.state);
+    if (!data.options || !data.options.length) break;
+    const best = pickBestOption(data.options);
+    const pickData = mpIsHost ? await api.pickCard(gid, best.id) : await api.pickCardGuest(gid, best.id);
+    applyStateFromServer(pickData.state);
+    phase = gamePhase;
+  }
+}
+
 async function handleHostTurn() {
   if (gamePhase === 'multiplayer_draw_host' || gamePhase === 'multiplayer_pick_host' || gamePhase === 'idle' || gamePhase === 'draw') {
+    if (_isAutoPlaying) {
+      await autoMpDrawPick();
+      setTimeout(pollHostTurn, 100);
+      return;
+    }
     await drawPhase();
     // drawPhase shows pick modal which starts its own timer; no fallback needed here
   } else if (gamePhase === 'place_player') {
     setPhase('🏯 放置你的部队');
     updateButtonStates();
   } else if (gamePhase === 'multiplayer_place') {
+    if (_isAutoPlaying) {
+      if (!s_hostPlacementReady) {
+        clearMpPlaceTimer();
+        try {
+          const data = await api.autoPlaceMySide(mpGameId, true);
+          applyStateFromServer(data);
+        } catch (e) {
+          addBattleLog('托管放置失败：' + e.message, 'lose');
+        }
+      }
+      setTimeout(pollHostTurn, 100);
+      return;
+    }
     if (s_hostPlacementReady) {
       setPhase('⏳ 等待对方放置...');
       updateButtonStates();
@@ -1836,6 +1877,7 @@ async function handleHostTurn() {
       }
     }, 500);
   } else if (gamePhase === 'gameover') {
+    if (_isAutoPlaying) toggleAutoPlay();
     setPhase('🏁 游戏结束');
     updateButtonStates();
     clearMpPlaceTimer();
@@ -1860,11 +1902,29 @@ async function pollHostTurn() {
 
 async function handleGuestTurn() {
   if (gamePhase === 'multiplayer_draw_guest' || gamePhase === 'multiplayer_pick_guest') {
+    if (_isAutoPlaying) {
+      await autoMpDrawPick();
+      setTimeout(pollGuestTurn, 100);
+      return;
+    }
     await drawPhaseGuest();
   } else if (gamePhase === 'place_guest') {
     setPhase('🏯 放置你的部队');
     updateButtonStates();
   } else if (gamePhase === 'multiplayer_place') {
+    if (_isAutoPlaying) {
+      if (!s_guestPlacementReady) {
+        clearMpPlaceTimer();
+        try {
+          const data = await api.autoPlaceMySide(mpGameId, false);
+          applyStateFromServer(data);
+        } catch (e) {
+          addBattleLog('托管放置失败：' + e.message, 'lose');
+        }
+      }
+      setTimeout(pollGuestTurn, 100);
+      return;
+    }
     if (s_guestPlacementReady) {
       setPhase('⏳ 等待对方放置...');
       updateButtonStates();
@@ -1887,6 +1947,7 @@ async function handleGuestTurn() {
     setPhase('⏳ 等待对方抽卡...');
     setTimeout(pollGuestTurn, 1000);
   } else if (gamePhase === 'gameover') {
+    if (_isAutoPlaying) toggleAutoPlay();
     setPhase('🏁 游戏结束');
     updateButtonStates();
     clearMpPlaceTimer();
@@ -1936,6 +1997,7 @@ async function drawPhaseGuest() {
 }
 
 function showPickModalGuest(options) {
+  if (_isAutoPlaying) return;
   const grid = document.getElementById('pickGrid');
   const title = document.querySelector('#pickModal h2');
   title.textContent = '选择武将牌（对手）';

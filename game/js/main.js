@@ -1,6 +1,5 @@
 // ==================== CONSTANTS ====================
-const BOARD_ROWS = 8, BOARD_COLS = 8;
-const PLAYER_ROWS = [4,5,6,7], AI_ROWS = [0,1,2,3];
+const HEX_RADIUS = 7, HEX_SIZE = 52;
 const PLACE_PER_ROUND = 5;
 const DRAW_PER_ROUND = 3;
 const INIT_DRAW = 10;
@@ -10,25 +9,114 @@ const TROOP_INCOME = 10000;
 const MAX_TOTAL_TROOPS = 300000;
 let s_hostPlacementReady = false;
 let s_guestPlacementReady = false;
-const TERRAIN_PATTERNS = {
-  normal: new Array(64).fill(true),
-  tennozan: (()=>{
-    const m = new Array(64).fill(false);
-    const actives = [8,6,4,2,2,4,6,8];
-    for (let r=0;r<8;r++) {
-      const n = actives[r], off = (8-n)/2;
-      for (let c=off;c<off+n;c++) m[r*8+c] = true;
-    }
-    return m;
-  })(),
-  nagashino: (()=>{
-    const m = new Array(64).fill(true);
-    for (let c=0;c<8;c++) { if (c===1||c===2||c===5||c===6) { m[3*8+c]=false; m[4*8+c]=false; } }
-    return m;
-  })()
+const MAX_UNITS_PER_SIDE = 12;
+function maxUnits() { return MAX_UNITS_PER_SIDE; }
+
+// Board shape: 14 rows (r = -6..7)
+// Row counts: 1,2,3,4,5,4,5,4,5,4,5,4,2,1
+const HEX_ROW_COUNTS = {
+  [-4]:5, [-3]:6, [-2]:7, [-1]:8,
+  [0]:8, [1]:7, [2]:6, [3]:5,
 };
-const MAX_UNITS_PER_SIDE = 16;
-function maxUnits() { return terrainMode === 'tennozan' ? 8 : terrainMode === 'nagashino' ? 12 : MAX_UNITS_PER_SIDE; }
+const HEX_ROW_Q_STARTS = {
+  [-2]: -4,  // shifted left 1
+  [-1]: -5,  // shifted left 1
+  [0]: -6,   // shifted left 2
+  [1]: -6,   // shifted left 3
+  [2]: -6,   // shifted left 3
+  [3]: -6,   // shifted left 4
+};
+
+function hexRowCount(r) { return HEX_ROW_COUNTS[r] || 0; }
+
+function rowQVals(r) {
+  const count = hexRowCount(r);
+  const qStart = HEX_ROW_Q_STARTS[r] !== undefined ? HEX_ROW_Q_STARTS[r] : -Math.floor(count / 2);
+  const res = [];
+  for (let q = qStart; q < qStart + count; q++) res.push(q);
+  return res;
+}
+
+const HEX_AXIAL_IDX = new Map();
+const HEX_IDX_AXIAL = [];
+let hidx = 0;
+const rList = Object.keys(HEX_ROW_COUNTS).map(Number).sort((a,b) => a-b);
+for (const r of rList) {
+  const qs = rowQVals(r);
+  for (const q of qs) {
+    HEX_AXIAL_IDX.set(q+','+r, hidx);
+    HEX_IDX_AXIAL[hidx] = [q, r];
+    hidx++;
+  }
+}
+
+function hexNeighbors(i) {
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const dirs = [[1,0],[0,1],[-1,1],[-1,0],[0,-1],[1,-1]];
+  const res = [];
+  for (const [dq, dr] of dirs) {
+    const ni = HEX_AXIAL_IDX.get((q+dq)+','+(r+dr));
+    if (ni !== undefined) res.push(ni);
+  }
+  return res;
+}
+
+function hexForward(i, isPlayer) {
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const dirs = isPlayer ? [[-1,0],[0,-1],[1,-1]] : [[1,0],[0,1],[-1,1]];
+  const res = [];
+  for (const [dq, dr] of dirs) {
+    const ni = HEX_AXIAL_IDX.get((q+dq)+','+(r+dr));
+    if (ni !== undefined) res.push(ni);
+  }
+  return res;
+}
+
+const HEX_DEPTH = HEX_IDX_AXIAL.map(([q, r]) => 2 * r + q);
+const HEX_FRONT_CELLS = [
+  toIdx(1,-2), toIdx(-1,-1), toIdx(-3,0), toIdx(-5,1),
+].filter(i => i !== undefined);
+const HEX_NEIGHBORS = HEX_IDX_AXIAL.map((_, i) => hexNeighbors(i));
+const HEX_PLAYER_FORWARD = HEX_IDX_AXIAL.map((_, i) => hexForward(i, true));
+const HEX_AI_FORWARD = HEX_IDX_AXIAL.map((_, i) => hexForward(i, false));
+const HEX_PLAYER_CELLS = HEX_IDX_AXIAL.map((_, i) => i).filter(i => HEX_DEPTH[i] > 0);
+const HEX_AI_CELLS = HEX_IDX_AXIAL.map((_, i) => i).filter(i => HEX_DEPTH[i] < 0);
+
+function toIdx(q, r) { return HEX_AXIAL_IDX.get(q+','+r); }
+
+const AI_FLAG_CELLS = [
+  toIdx(-2,-4), toIdx(-1,-4), toIdx(0,-4),
+  toIdx(-3,-3), toIdx(-2,-3), toIdx(-1,-3),
+  toIdx(-4,-2), toIdx(-3,-2), toIdx(-2,-2),
+].filter(i => i !== undefined);
+
+const PLAYER_FLAG_CELLS = [
+  toIdx(-2,1), toIdx(-1,1), toIdx(0,1),
+  toIdx(-3,2), toIdx(-2,2), toIdx(-1,2),
+  toIdx(-4,3), toIdx(-3,3), toIdx(-2,3),
+].filter(i => i !== undefined);
+
+// Visual zone helpers — this board has mixed zones on same r
+const VISUAL_AI_CELLS = [
+  toIdx(1,-4), toIdx(2,-4),
+  toIdx(0,-3), toIdx(1,-3), toIdx(2,-3),
+  toIdx(-1,-2), toIdx(0,-2),
+  toIdx(-5,-1), toIdx(-4,-1), toIdx(-3,-1), toIdx(-2,-1),
+  toIdx(-6,0), toIdx(-5,0), toIdx(-4,0),
+  toIdx(-6,1),
+].filter(i => i !== undefined);
+const VISUAL_PLAYER_CELLS = [
+  toIdx(2,-2),
+  toIdx(0,-1), toIdx(1,-1), toIdx(2,-1),
+  toIdx(-2,0), toIdx(-1,0), toIdx(0,0), toIdx(1,0),
+  toIdx(-4,1), toIdx(-3,1),
+  toIdx(-6,2), toIdx(-5,2), toIdx(-4,2),
+  toIdx(-6,3), toIdx(-5,3),
+].filter(i => i !== undefined);
+
+// Cell spacing and visual size for rendering
+const HEX_CELL_SIZE = 50;
+const HEX_CELL_DRAW_SIZE = HEX_CELL_SIZE;
 const RATING_COLORS = { 'S+':'#8b0000','S':'#e94560','A':'#8b4513','B':'#ffd700','C':'#2e8b57','D':'#1e90ff' };
 const TYPE_COLORS = { '全能':'#f5a623','武将':'#e94560','文臣':'#3498db','特才':'#9b59b6' };
 const MON_CRESTS = ['◈','◆','★','✿','❖','⚘','✧','❀','✦','♰'];
@@ -77,12 +165,14 @@ function flagIcon(color) {
 // ==================== STATE ====================
 let gameId = null;
 let round = 0, gamePhase = 'idle', drawPileCount = 100, placedThisTurn = 0;
-let player = { collection: [], board: Array(64).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
-let ai = { collection: [], board: Array(64).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
+let player = { collection: [], board: Array(HEX_SIZE).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
+let ai = { collection: [], board: Array(HEX_SIZE).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
 let selectedChar = null, selectedCell = null;
 let playerCatFilter = 'all', aiCatFilter = 'all', playerSortBy = 'default', aiSortBy = 'default', editorSortBy = 'id';
 let avatarCache = {};
 let playerCooldowns = [], aiCooldowns = [];
+let firstScalerUid = null, firstScalerRound = null;
+let loneBravePlayer = false, loneBraveAi = false, loneBraveRound = null;
 let autoPlay = false;
 let _isAutoPlaying = false;
 let quickDrawMode = false;
@@ -97,7 +187,7 @@ function normalizeSide(obj) {
   if (!obj) return obj;
   return {
     collection: obj.collection || [],
-    board: obj.board || Array(64).fill(null),
+    board: obj.board || Array(HEX_SIZE).fill(null),
     troops: obj.troops || 0,
     flagIdx: obj.flag_idx ?? obj.flagIdx ?? -1,
     placed: obj.placed ?? 0,
@@ -147,6 +237,11 @@ function applyStateFromServer(data) {
   terrainMode = s.terrain_mode ?? s.terrainMode ?? terrainMode;
   s_hostPlacementReady = s.host_placement_ready ?? false;
   s_guestPlacementReady = s.guest_placement_ready ?? false;
+  if (s.first_scaler_uid !== undefined) firstScalerUid = s.first_scaler_uid;
+  if (s.first_scaler_round !== undefined) firstScalerRound = s.first_scaler_round;
+  if (s.lone_brave_player !== undefined) loneBravePlayer = s.lone_brave_player;
+  if (s.lone_brave_ai !== undefined) loneBraveAi = s.lone_brave_ai;
+  if (s.lone_brave_round !== undefined) loneBraveRound = s.lone_brave_round;
   const logs = s.battle_log ?? s.battleLog;
   if (logs && logs.length) {
     logs.forEach(entry => addBattleLog(entry.msg || entry.message, entry.type || 'info'));
@@ -283,23 +378,84 @@ function generateAvatar(char, size) {
 }
 
 // ==================== BOARD ====================
-function idx(r,c){return r*BOARD_COLS+c}
-function rowOf(i){return Math.floor(i/BOARD_COLS)}
-function colOf(i){return i%BOARD_COLS}
-function inRange(r,c){return r>=0&&r<BOARD_ROWS&&c>=0&&c<BOARD_COLS}
-function isActiveCell(i) { return TERRAIN_PATTERNS[terrainMode][i]; }
+function isActiveCell(i) { return true; }
 function isGuestView() { return !!(mpGameId && !mpIsHost); }
 // Map server cell index ↔ local display index (guest sees 180° rotation)
-function localCell(i) { return isGuestView() ? (63 - i) : i; }
-function serverCell(i) { return isGuestView() ? (63 - i) : i; }
+function hexRotate180(i) {
+  const [q, r] = HEX_IDX_AXIAL[i];
+  return HEX_AXIAL_IDX.get((-q)+','+(-r)) ?? i;
+}
+function localCell(i) { return isGuestView() ? hexRotate180(i) : i; }
+function serverCell(i) { return isGuestView() ? hexRotate180(i) : i; }
+
+function hexPx(i) {
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const s = HEX_CELL_SIZE / 2;
+  return {
+    x: s * (3/2 * q),
+    y: s * (Math.sqrt(3) * r + Math.sqrt(3)/2 * q)
+  };
+}
 
 function initBoard() {
   const el = document.getElementById('board');
-  el.innerHTML = '<div class="divider"></div>';
-  for (let i = 0; i < 64; i++) {
+  el.innerHTML = '';
+  const layoutW = window.innerWidth - 34;
+  const wrapperW = layoutW * 0.5;
+  const boardW = layoutW * 0.5;
+  const wrapper = el.parentElement;
+  wrapper.style.width = wrapperW + 'px';
+  wrapper.style.flex = 'none';
+  const rp = document.querySelector('.right-panel');
+  if (rp) rp.style.flex = '0 0 ' + (layoutW * 0.5) + 'px';
+
+  // Compute board pixel dimensions
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  const centers = [];
+  for (let i = 0; i < HEX_SIZE; i++) {
+    const p = hexPx(i);
+    centers.push(p);
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const pad = HEX_CELL_DRAW_SIZE / 2 + 4;
+  const bw = maxX - minX + pad * 2;
+  const bh = maxY - minY + pad * 2;
+  const scale = boardW / bw;
+  el.style.width = bw + 'px';
+  el.style.height = bh + 'px';
+  el.style.margin = '0';
+  el.style.transform = 'scale(' + scale + ')';
+  el.style.transformOrigin = 'top left';
+  el.style.position = 'relative';
+
+  // Spacer to push buttons below the scaled board
+  const spacer = document.createElement('div');
+  spacer.style.height = (bh * (scale - 1)) + 'px';
+  el.after(spacer);
+  for (let i = 0; i < HEX_SIZE; i++) {
+    const p = centers[i];
+    const cx = p.x - minX + pad;
+    const cy = p.y - minY + pad;
     const cell = document.createElement('div');
-    cell.className = 'cell ' + (rowOf(i) < 4 ? 'ai-zone' : 'player-zone');
+    let zone;
+    if (AI_FLAG_CELLS.includes(i)) zone = 'ai-zone';
+    else if (PLAYER_FLAG_CELLS.includes(i)) zone = 'player-zone';
+    else if (HEX_FRONT_CELLS.includes(i)) zone = 'front-zone';
+    else if (VISUAL_AI_CELLS.includes(i)) zone = 'ai-zone';
+    else zone = 'player-zone';
+    let extra = '';
+    if (AI_FLAG_CELLS.includes(i)) extra = ' ai-flag-zone';
+    else if (PLAYER_FLAG_CELLS.includes(i)) extra = ' player-flag-zone';
+    cell.className = 'cell ' + zone + extra;
     cell.dataset.index = i;
+    cell.style.position = 'absolute';
+    cell.style.left = (cx - HEX_CELL_DRAW_SIZE/2) + 'px';
+    cell.style.top = (cy - HEX_CELL_DRAW_SIZE/2) + 'px';
+    cell.style.width = HEX_CELL_DRAW_SIZE + 'px';
+    cell.style.height = HEX_CELL_DRAW_SIZE + 'px';
     cell.addEventListener('click', () => onCellClick(i));
     cell.addEventListener('contextmenu', e => { e.preventDefault(); onRightClick(i); });
     el.appendChild(cell);
@@ -313,10 +469,20 @@ function renderBoardFull() {
   const cells = document.querySelectorAll('.cell');
   cells.forEach((cell, i) => {
     const di = localCell(i);
-    const origRow = rowOf(di);
-    cell.className = 'cell ' + (isGuestView()
-      ? (origRow < 4 ? 'player-zone' : 'ai-zone')
-      : (origRow < 4 ? 'ai-zone' : 'player-zone'));
+    let extra = '';
+    if (AI_FLAG_CELLS.includes(di)) extra = ' ai-flag-zone';
+    else if (PLAYER_FLAG_CELLS.includes(di)) extra = ' player-flag-zone';
+    let z;
+    if (AI_FLAG_CELLS.includes(di)) z = 'ai-zone';
+    else if (PLAYER_FLAG_CELLS.includes(di)) z = 'player-zone';
+    else if (HEX_FRONT_CELLS.includes(di)) z = 'front-zone';
+    else if (VISUAL_AI_CELLS.includes(di)) z = 'ai-zone';
+    else z = 'player-zone';
+    if (isGuestView()) {
+      if (z === 'ai-zone') z = 'player-zone';
+      else if (z === 'player-zone') z = 'ai-zone';
+    }
+    cell.className = 'cell ' + z + extra;
     if (!isActiveCell(di)) cell.classList.add('inactive');
     let pu = player.board[di], au = ai.board[di];
     // In simultaneous multiplayer placement, hide only newly placed opponent units
@@ -335,22 +501,19 @@ function renderBoardFull() {
         const pFlag = isGuestView() ? (ai.flagIdx === di) : (player.flagIdx === di);
         const aFlag = isGuestView() ? (player.flagIdx === di) : (ai.flagIdx === di);
         if (pFlag||aFlag) cell.classList.add('flag-cell');
-        const pPower = Math.round(calcPower(di, true)), aPower2 = Math.round(calcPower(di, false));
-        const pfBadges = getFactions(pu.char).map(f => `<span class="bu-faction-badge player-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
-        const afBadges = getFactions(au.char).map(f => `<span class="bu-faction-badge ai-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
-        cell.innerHTML = `${pfBadges}${afBadges}<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,18)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?flagIcon('#ffd700'):''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?flagIcon('#4caf50'):''}${generateAvatar(au.char,18)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
+        cell.innerHTML = `<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,14)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?flagIcon('#ffd700'):''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?flagIcon('#4caf50'):''}${generateAvatar(au.char,14)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
       } else {
         const isFlag = (isPlayer && (isGuestView() ? ai.flagIdx === di : player.flagIdx === di)) || (!isPlayer && (isGuestView() ? player.flagIdx === di : ai.flagIdx === di));
         if (isFlag) cell.classList.add('flag-cell');
-        const flagIconSvg = isFlag ? `<span class="u-flag-abs">${flagIcon(isPlayer ? '#ffd700' : '#4caf50')}</span>` : '';
-        const dirIcon = isPlayer ? '▲' : '▼';
         const power = Math.round(calcPower(di, isPlayer));
-        const fBadges = getFactions(u.char).map(f => `<span class="u-faction-badge" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
-        cell.innerHTML = `${fBadges}${flagIconSvg}<img class="u-avatar" src="${generateAvatar(u.char,24)}" alt="">
-          <span class="u-name">${u.char.name}</span>
-          <span class="u-power">${power}</span>
+        const flagHtml = isFlag ? `<span class="u-flag-inner">${flagIcon(isPlayer ? '#ffd700' : '#4caf50')}</span>` : '';
+        const factions = getFactions(u.char);
+        const factionHtml = factions.length ? renderFactionBadges(factions, '/') : '';
+        cell.innerHTML = `<span class="u-power">${power}</span>
           <span class="u-troops">${u.troops.toLocaleString()}</span>
-          <span class="u-owner">${dirIcon}</span>`;
+          <div class="u-avatar-wrap"><img class="u-avatar" src="${generateAvatar(u.char,22)}" alt="">${flagHtml}</div>
+          <span class="u-name">${u.char.name}</span>
+          <span class="u-faction">${factionHtml}</span>`;
       }
     } else {
       if (selectedCell === i) cell.classList.add('highlight');
@@ -369,9 +532,9 @@ function onCellClick(index) {
   const di = localCell(index);
   const u = getUnit(index);
   if (!u) {
-    const canPlace = isGuestView()
-      ? ((gamePhase === 'place_guest' || gamePhase === 'multiplayer_place') && placedThisTurn < PLACE_PER_ROUND && AI_ROWS.includes(rowOf(di)))
-      : ((gamePhase === 'place_player' || gamePhase === 'multiplayer_place') && placedThisTurn < PLACE_PER_ROUND && PLAYER_ROWS.includes(rowOf(di)));
+    const isPlayerSide = isGuestView() ? false : true;
+    const canPlace = (HEX_DEPTH[di] > 0) === isPlayerSide
+      && ((gamePhase === 'place_player' || gamePhase === 'place_guest' || gamePhase === 'multiplayer_place') && placedThisTurn < PLACE_PER_ROUND);
     if (canPlace) {
       if (!isActiveCell(di)) { setPhase('❌ 此格不可用'); return; }
       if ((isGuestView() ? ai.board.filter(u=>u).length : player.board.filter(u=>u).length) >= maxUnits()) { setPhase('❌ 已达上限'+maxUnits()+'名武将'); return; }
@@ -392,20 +555,18 @@ function onRightClick(index) {
 }
 
 // ==================== COMBAT DISPLAY UTILITIES ====================
-function getNeighborIndices(i) {
-  const r = rowOf(i), c = colOf(i), res = [];
-  for (let dr = -1; dr <= 1; dr++)
-    for (let dc = -1; dc <= 1; dc++)
-      if (dr!==0||dc!==0) { const nr=r+dr,nc=c+dc; if (inRange(nr,nc)) res.push(idx(nr,nc)); }
-  return res;
-}
+function getNeighborIndices(i) { return HEX_NEIGHBORS[i]; }
 
 function getConeIndices(i, isPlayer) {
-  const r = rowOf(i), c = colOf(i);
-  const dir = isPlayer ? -1 : 1;
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const dirs = isPlayer ? [[-1,0],[0,-1],[1,-1]] : [[1,0],[0,1],[-1,1]];
   const res = [];
-  for (let dc = -1; dc <= 1; dc++) { const nr=r+dir,nc=c+dc; if (inRange(nr,nc)) res.push(idx(nr,nc)); }
-  for (let dc = -2; dc <= 2; dc++) { const nr=r+dir*2,nc=c+dc; if (inRange(nr,nc)) res.push(idx(nr,nc)); }
+  for (const [dq, dr] of dirs) {
+    const f1 = HEX_AXIAL_IDX.get((q+dq)+','+(r+dr));
+    if (f1 !== undefined) res.push(f1);
+    const f2 = HEX_AXIAL_IDX.get((q+2*dq)+','+(r+2*dr));
+    if (f2 !== undefined) res.push(f2);
+  }
   return res;
 }
 
@@ -445,7 +606,7 @@ function calcPower(index, isPlayer) {
     }
   });
   power += u.char.leadership * flagMul * 0.05;
-  for (let ei=0;ei<64;ei++) {
+  for (let ei=0;ei<HEX_SIZE;ei++) {
     const eu = enBoard[ei];
     if (!eu) continue;
     const cone = getConeIndices(ei, !isPlayer);
@@ -455,20 +616,47 @@ function calcPower(index, isPlayer) {
   const isLord = u.char.lord_name === u.char.name;
   if (isLord && !hasQunxiong) {
     let count = 0;
-    for (let i=0;i<64;i++) {
+    for (let i=0;i<HEX_SIZE;i++) {
       const fu = myBoard[i];
       if (fu && fu !== u && uFactions.includes(fu.char.faction)) count++;
     }
     power *= (1 + count * 0.05);
   }
+  // 居高临下: unit in front zone → +5%
+  if (HEX_FRONT_CELLS.indexOf(index) >= 0) {
+    power *= 1.05;
+  }
+  // 先登: first scaler → +10% (lasts 5 rounds)
+  if (u.uid === firstScalerUid && firstScalerRound !== null && round <= firstScalerRound + 5) {
+    power *= 1.10;
+  }
+  // 孤勇者: lone flag general → +50% (lasts 10 rounds)
+  if (loneBraveRound !== null && round <= loneBraveRound + 10) {
+    if (isPlayer && loneBravePlayer && isFlagUnit(index, true)) {
+      power *= 1.50;
+    }
+    if (!isPlayer && loneBraveAi && isFlagUnit(index, false)) {
+      power *= 1.50;
+    }
+  }
   return Math.max(1, Math.round(power));
 }
 
 function isBehindEnemyLine(idx, isPlayer) {
-  const r=rowOf(idx), c=colOf(idx);
-  const enBoard=isPlayer?ai.board:player.board;
-  if (isPlayer) { for (let rr=r+1;rr<8;rr++) if (enBoard[rr*8+c]) return true; }
-  else { for (let rr=r-1;rr>=0;rr--) if (enBoard[rr*8+c]) return true; }
+  const fwd = isPlayer ? HEX_AI_FORWARD : HEX_PLAYER_FORWARD;
+  const enBoard = isPlayer ? ai.board : player.board;
+  // BFS up to 4 steps along forward direction
+  let visited = new Set([idx]);
+  let queue = [...fwd[idx]];
+  while (queue.length) {
+    const ni = queue.shift();
+    if (ni === undefined || visited.has(ni)) continue;
+    visited.add(ni);
+    if (enBoard[ni]) return true;
+    for (const f of fwd[ni]) {
+      if (f !== undefined && !visited.has(f)) queue.push(f);
+    }
+  }
   return false;
 }
 
@@ -486,11 +674,11 @@ function showDetailUnit(u, isPlayer, idx) {
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
       <div class="d-info">
         <div class="dname" style="color:${rc}">${char.name} ${isFlag?'🚩':''}</div>
-        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''}${getFactions(char).length ? ' · ' + renderFactionBadges(getFactions(char)) : ''}${char.lord_name === char.name ? ' · 👑 主公' : ''} · 战力 ${power}</div>${getFactions(char).length ? `<div class="d-faction">${renderFactionBadges(getFactions(char), ' ')}</div>` : ''}
+        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''}${getFactions(char).length ? ' · ' + renderFactionBadges(getFactions(char)) : ''}${char.lord_name === char.name ? ' · 👑 主公' : ''}</div>${getFactions(char).length ? `<div class="d-faction">${renderFactionBadges(getFactions(char), ' ')}</div>` : ''}
         ${char.note ? `<div class="dnote">${escHtml(char.note)}</div>` : ''}
       </div>
     </div>
-    <div class="d-troops ${isPlayer?'player':'ai'}">⚔ ${u.troops.toLocaleString()} 兵力</div>
+    <div class="d-troops ${isPlayer?'player':'ai'}">⚔ ${power} 👤 ${u.troops.toLocaleString()}</div>
     ${statBar('统率',char.leadership,'#e94560')}
     ${statBar('武力',char.martial,'#f5a623')}
     ${statBar('智力',char.intelligence,'#2ecc71')}
@@ -949,7 +1137,7 @@ function showVictory(win) {
 
 function totalTroops(side) {
   let t = 0;
-  for (let i=0;i<64;i++) if (side.board[i]) t += side.board[i].troops;
+  for (let i=0;i<HEX_SIZE;i++) if (side.board[i]) t += side.board[i].troops;
   return t;
 }
 
@@ -2491,7 +2679,7 @@ function openSettings() {
   const n = Math.floor(Math.random() * 3) + 1;
   const bg = document.createElement('div');
   bg.className = 'main-menu-bg';
-  bg.style.backgroundImage = `url(posters/${n}.webp)`;
+  bg.style.backgroundImage = `url(posters/${n}.webp?v=0.1.2)`;
   document.getElementById('mainMenu').insertBefore(bg, document.getElementById('mainMenu').firstChild);
   // Attempt autoplay (may be blocked by browser policy)
   MusicManager.play('menu');

@@ -2679,7 +2679,7 @@ function openSettings() {
   const n = Math.floor(Math.random() * 3) + 1;
   const bg = document.createElement('div');
   bg.className = 'main-menu-bg';
-  bg.style.backgroundImage = `url(posters/${n}.webp?v=0.1.2)`;
+  bg.style.backgroundImage = `url(posters/${n}.webp?v=0.1.3)`;
   document.getElementById('mainMenu').insertBefore(bg, document.getElementById('mainMenu').firstChild);
   // Attempt autoplay (may be blocked by browser policy)
   MusicManager.play('menu');

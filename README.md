@@ -1,6 +1,6 @@
 # 信长之野望-战国夺旗 v0.1.2
 
-![封面](game/posters/1.webp)
+![封面](game/posters/1.webp?v=0.1.3)
 
 基于日本战国历史的回合制策略棋盘游戏 + WebSocket 实时多人对战。
 

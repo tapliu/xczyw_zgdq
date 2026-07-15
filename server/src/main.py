@@ -73,7 +73,7 @@ async def _heartbeat_loop():
     while True:
         await asyncio.sleep(15)
         try:
-            ws_manager.heartbeat_check()
+            await ws_manager.heartbeat_check()
         except Exception:
             logger.exception('heartbeat_check failed')
 

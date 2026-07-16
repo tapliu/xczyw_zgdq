@@ -1408,10 +1408,16 @@ class GameState:
         for i in range(HEX_SIZE):
             if self.player.board[i] and i not in engaged_p:
                 candidates = [fi for fi in HEX_PLAYER_FORWARD[i] if fi is not None and not self.player.board[fi] and not self.ai.board[fi] and self._is_active_cell(fi)]
+                # Flag general cannot leave flag zone unless lone brave is active
+                if i == self.player.flag_idx and not self.lone_brave_player:
+                    candidates = [c for c in candidates if c in PLAYER_FLAG_CELLS]
                 u = self.player.board[i]
                 p_desires.append({'idx': i, 'unit': u, 'troops': u.troops, 'power': u.char['martial'] + u.char['leadership'], 'candidates': candidates})
             if self.ai.board[i] and i not in engaged_a:
                 candidates = [fi for fi in HEX_AI_FORWARD[i] if fi is not None and not self.player.board[fi] and not self.ai.board[fi] and self._is_active_cell(fi)]
+                # Flag general cannot leave flag zone unless lone brave is active
+                if i == self.ai.flag_idx and not self.lone_brave_ai:
+                    candidates = [c for c in candidates if c in AI_FLAG_CELLS]
                 u = self.ai.board[i]
                 a_desires.append({'idx': i, 'unit': u, 'troops': u.troops, 'power': u.char['martial'] + u.char['leadership'], 'candidates': candidates})
 

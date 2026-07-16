@@ -2067,8 +2067,9 @@ async function autoMpDrawPick() {
   const gid = mpGameId;
   let phase = gamePhase;
   while (_isAutoPlaying && (
-    phase === 'multiplayer_draw_host' || phase === 'multiplayer_pick_host' ||
-    phase === 'multiplayer_draw_guest' || phase === 'multiplayer_pick_guest'
+    mpIsHost
+      ? (phase === 'multiplayer_draw_host' || phase === 'multiplayer_pick_host')
+      : (phase === 'multiplayer_draw_guest' || phase === 'multiplayer_pick_guest')
   )) {
     const data = mpIsHost ? await api.drawOptions(gid) : await api.drawOptionsGuest(gid);
     applyStateFromServer(data.state);
@@ -2201,6 +2202,10 @@ async function handleGuestTurn() {
     updateButtonStates();
     setTimeout(pollGuestTurn, 1000);
   } else if (gamePhase === 'idle' || gamePhase === 'draw') {
+    if (_isAutoPlaying) {
+      setTimeout(pollGuestTurn, 100);
+      return;
+    }
     setPhase('⏳ 等待对方抽卡...');
     setTimeout(pollGuestTurn, 1000);
   } else if (gamePhase === 'gameover') {

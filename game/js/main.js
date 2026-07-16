@@ -397,48 +397,39 @@ function hexPx(i) {
   };
 }
 
+let _boardEl = null, _boardBw = 0, _boardBh = 0, _boardPad = 0, _boardCenters = [], _boardSpacer = null;
+
 function initBoard() {
   const el = document.getElementById('board');
   el.innerHTML = '';
-  const layoutW = window.innerWidth - 34;
-  const wrapperW = layoutW * 0.5;
-  const boardW = layoutW * 0.5;
-  const wrapper = el.parentElement;
-  wrapper.style.width = wrapperW + 'px';
-  wrapper.style.flex = 'none';
-  const rp = document.querySelector('.right-panel');
-  if (rp) rp.style.flex = '0 0 ' + (layoutW * 0.5) + 'px';
+  _boardEl = el;
 
-  // Compute board pixel dimensions
+  // Compute board pixel dimensions (cached)
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  const centers = [];
+  _boardCenters = [];
   for (let i = 0; i < HEX_SIZE; i++) {
     const p = hexPx(i);
-    centers.push(p);
+    _boardCenters.push(p);
     if (p.x < minX) minX = p.x;
     if (p.x > maxX) maxX = p.x;
     if (p.y < minY) minY = p.y;
     if (p.y > maxY) maxY = p.y;
   }
-  const pad = HEX_CELL_DRAW_SIZE / 2 + 4;
-  const bw = maxX - minX + pad * 2;
-  const bh = maxY - minY + pad * 2;
-  const scale = boardW / bw;
-  el.style.width = bw + 'px';
-  el.style.height = bh + 'px';
+  _boardPad = HEX_CELL_DRAW_SIZE / 2 + 4;
+  _boardBw = maxX - minX + _boardPad * 2;
+  _boardBh = maxY - minY + _boardPad * 2;
+
+  el.style.width = _boardBw + 'px';
+  el.style.height = _boardBh + 'px';
   el.style.margin = '0';
-  el.style.transform = 'scale(' + scale + ')';
   el.style.transformOrigin = 'top left';
   el.style.position = 'relative';
 
-  // Spacer to push buttons below the scaled board
-  const spacer = document.createElement('div');
-  spacer.style.height = (bh * (scale - 1)) + 'px';
-  el.after(spacer);
+  // Create cells (one-time)
   for (let i = 0; i < HEX_SIZE; i++) {
-    const p = centers[i];
-    const cx = p.x - minX + pad;
-    const cy = p.y - minY + pad;
+    const p = _boardCenters[i];
+    const cx = p.x - minX + _boardPad;
+    const cy = p.y - minY + _boardPad;
     const cell = document.createElement('div');
     let zone;
     if (AI_FLAG_CELLS.includes(i)) zone = 'ai-zone';
@@ -460,6 +451,35 @@ function initBoard() {
     cell.addEventListener('contextmenu', e => { e.preventDefault(); onRightClick(i); });
     el.appendChild(cell);
   }
+
+  // Create spacer for scaled board
+  _boardSpacer = document.createElement('div');
+  el.after(_boardSpacer);
+
+  // Apply responsive layout
+  _applyBoardLayout();
+
+  // Listen for resize / orientation change
+  window.addEventListener('resize', _applyBoardLayout);
+  if (screen.orientation) {
+    screen.orientation.addEventListener('change', _applyBoardLayout);
+  }
+}
+
+function _applyBoardLayout() {
+  if (!_boardEl) return;
+  const container = _boardEl.closest('.container');
+  const cw = container ? container.clientWidth : window.innerWidth;
+  const layoutW = Math.max(100, cw - 34);
+  const wrapper = _boardEl.parentElement;
+  wrapper.style.width = (layoutW * 0.5) + 'px';
+  wrapper.style.flex = 'none';
+  const rp = document.querySelector('.right-panel');
+  if (rp) rp.style.flex = '0 0 ' + (layoutW * 0.5) + 'px';
+  const scale = (layoutW * 0.5) / _boardBw;
+  _boardEl.style.transform = 'scale(' + scale + ')';
+  // Update spacer to push buttons below the scaled board
+  _boardSpacer.style.height = (_boardBh * (scale - 1)) + 'px';
 }
 
 function getUnit(idx) { const d = localCell(idx); return player.board[d] || ai.board[d]; }

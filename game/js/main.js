@@ -406,7 +406,7 @@ function hexPx(i) {
   };
 }
 
-let _boardEl = null, _boardBw = 0, _boardBh = 0, _boardPad = 0, _boardCenters = [], _boardSpacer = null;
+let _boardEl = null, _boardBw = 0, _boardBh = 0, _boardPad = 0, _boardCenters = [];
 
 function initBoard() {
   const el = document.getElementById('board');
@@ -468,10 +468,6 @@ function initBoard() {
     el.appendChild(cell);
   }
 
-  // Create spacer for scaled board
-  _boardSpacer = document.createElement('div');
-  el.after(_boardSpacer);
-
   // Apply responsive layout
   _applyBoardLayout();
 
@@ -494,8 +490,8 @@ function _applyBoardLayout() {
   if (rp) rp.style.flex = '0 0 ' + (layoutW * 0.5) + 'px';
   const scale = (layoutW * 0.5) / _boardBw;
   _boardEl.style.transform = 'scale(' + scale + ')';
-  // Update spacer to push buttons below the scaled board
-  _boardSpacer.style.height = (_boardBh * (scale - 1)) + 'px';
+  // Negative margin pulls buttons up when board is scaled down
+  _boardEl.style.marginBottom = (_boardBh * (scale - 1)) + 'px';
 }
 
 function getUnit(idx) { const d = localCell(idx); return player.board[d] || ai.board[d]; }

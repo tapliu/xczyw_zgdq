@@ -108,12 +108,7 @@ music_dir = os.path.join(os.path.dirname(__file__), 'data', 'music')
 if os.path.isdir(music_dir):
     app.mount("/music", StaticFiles(directory=music_dir), name="music")
 
-static_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'game')
-if os.path.isdir(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
-
-
-# ── WebSocket Endpoint ─────────────────────────────────────────────────
+# ── WebSocket Endpoint (must be before static mount at /) ────────────────
 
 @app.websocket('/ws/{game_id}/{role}')
 async def websocket_endpoint(ws: WebSocket, game_id: str, role: str):
@@ -204,6 +199,13 @@ async def websocket_endpoint(ws: WebSocket, game_id: str, role: str):
             if not peers:
                 await bs.stop()
                 battle_sessions.pop(game_id, None)
+
+
+# ── Static files (after WebSocket route to avoid intercepting WS) ────
+
+static_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'game')
+if os.path.isdir(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
 
 
 # ── Entry Point ────────────────────────────────────────────────────────

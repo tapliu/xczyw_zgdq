@@ -1575,23 +1575,26 @@ class GameState:
 
             adv = ''
             if self._is_active_cell(g['gapIdx']):
-                if p_alive and not a_alive:
+                # Flag general cannot advance out of flag zone unless lone brave
+                p_ok = not (g['pIdx'] == self.player.flag_idx and g['gapIdx'] not in PLAYER_FLAG_CELLS and not self.lone_brave_player)
+                a_ok = not (g['aIdx'] == self.ai.flag_idx and g['gapIdx'] not in AI_FLAG_CELLS and not self.lone_brave_ai)
+                if p_alive and not a_alive and p_ok:
                     self.player.board[g['gapIdx']] = pu
                     self.player.board[g['pIdx']] = None
                     self._check_first_scaler(g['gapIdx'], True)
                     adv = pn
-                elif not p_alive and a_alive:
+                elif not p_alive and a_alive and a_ok:
                     self.ai.board[g['gapIdx']] = au
                     self.ai.board[g['aIdx']] = None
                     self._check_first_scaler(g['gapIdx'], False)
                     adv = an
                 elif p_alive and a_alive:
-                    if p_loss_pct < a_loss_pct:
+                    if p_loss_pct < a_loss_pct and p_ok:
                         self.player.board[g['gapIdx']] = pu
                         self.player.board[g['pIdx']] = None
                         self._check_first_scaler(g['gapIdx'], True)
                         adv = pn
-                    elif a_loss_pct < p_loss_pct:
+                    elif a_loss_pct < p_loss_pct and a_ok:
                         self.ai.board[g['gapIdx']] = au
                         self.ai.board[g['aIdx']] = None
                         self._check_first_scaler(g['gapIdx'], False)
@@ -1680,22 +1683,30 @@ class GameState:
                 elif a_loss_pct < p_loss_pct:
                     self.ai.board[i] = au
                     self.player.board[i] = None
+                    pushed = False
                     for fi in HEX_PLAYER_FORWARD[i]:
                         if fi is not None and self._is_active_cell(fi) and not self.player.board[fi] and not self.ai.board[fi]:
+                            if i == self.player.flag_idx and fi not in PLAYER_FLAG_CELLS and not self.lone_brave_player:
+                                continue
                             self.player.board[fi] = pu
                             pu.pinned = True
+                            pushed = True
                             break
-                    else:
+                    if not pushed:
                         self.player.board[i] = pu
                         pu.pinned = True
                     all_res.append(f'[前败] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) 被 {an}({a_tag})(损{int(a_loss_pct * 100)}%) 击退')
                 else:
                     self.ai.board[i] = None
+                    pushed = False
                     for fi in HEX_AI_FORWARD[i]:
                         if fi is not None and self._is_active_cell(fi) and not self.player.board[fi] and not self.ai.board[fi]:
+                            if i == self.ai.flag_idx and fi not in AI_FLAG_CELLS and not self.lone_brave_ai:
+                                continue
                             self.ai.board[fi] = au
+                            pushed = True
                             break
-                    else:
+                    if not pushed:
                         self.ai.board[i] = au
                     self.player.board[i] = pu
                     all_res.append(f'[前对峙] {pn}({p_tag})(损{int(p_loss_pct * 100)}%) ⚔ {an}({a_tag})(损{int(a_loss_pct * 100)}%)')

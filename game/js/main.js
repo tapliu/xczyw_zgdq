@@ -530,7 +530,7 @@ function renderBoardFull() {
         const pFlag = isGuestView() ? (ai.flagIdx === di) : (player.flagIdx === di);
         const aFlag = isGuestView() ? (player.flagIdx === di) : (ai.flagIdx === di);
         if (pFlag||aFlag) cell.classList.add('flag-cell');
-        cell.innerHTML = `<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,14)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?flagIcon('#ffd700'):''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?flagIcon('#4caf50'):''}${generateAvatar(au.char,14)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
+        cell.innerHTML = `<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,12)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?flagIcon('#ffd700'):''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?flagIcon('#4caf50'):''}${generateAvatar(au.char,12)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
       } else {
         const isFlag = (isPlayer && (isGuestView() ? ai.flagIdx === di : player.flagIdx === di)) || (!isPlayer && (isGuestView() ? player.flagIdx === di : ai.flagIdx === di));
         if (isFlag) cell.classList.add('flag-cell');
@@ -540,7 +540,7 @@ function renderBoardFull() {
         const factionHtml = factions.length ? renderFactionBadges(factions, '/') : '';
         cell.innerHTML = `<span class="u-power">${power}</span>
           <span class="u-troops">${u.troops.toLocaleString()}</span>
-          <div class="u-avatar-wrap"><img class="u-avatar" src="${generateAvatar(u.char,22)}" alt="">${flagHtml}</div>
+          <div class="u-avatar-wrap"><img class="u-avatar" src="${generateAvatar(u.char,14)}" alt="">${flagHtml}</div>
           <span class="u-name">${u.char.name}</span>
           <span class="u-faction">${factionHtml}</span>`;
       }

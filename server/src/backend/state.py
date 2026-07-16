@@ -1950,6 +1950,28 @@ class GameState:
         na_idx = find_flag(self.ai.board, a_flag_unit)
         self.ai.flag_idx = na_idx if na_idx >= 0 else -1
 
+        # Ensure flag generals stay within their flag zone unless lone brave is active
+        for sp, zc in ((True, PLAYER_FLAG_CELLS), (False, AI_FLAG_CELLS)):
+            brd = self.player.board if sp else self.ai.board
+            ebrd = self.ai.board if sp else self.player.board
+            fi = self.player.flag_idx if sp else self.ai.flag_idx
+            lb = self.lone_brave_player if sp else self.lone_brave_ai
+            if fi >= 0 and fi not in zc and not lb:
+                u = brd[fi]
+                for fc in zc:
+                    if not brd[fc] and not ebrd[fc]:
+                        brd[fc] = u
+                        brd[fi] = None
+                        if sp:
+                            self.player.flag_idx = fc
+                        else:
+                            self.ai.flag_idx = fc
+                        self._log(f'🚩 旗本 {u.char["name"]} 退回旗本区域', 'info')
+                        break
+                else:
+                    # No empty flag cell — flag gen stays but log a warning
+                    self._log(f'⚠ 旗本 {u.char["name"]} 在旗本区域外且无空位可退', 'info')
+
         # 孤勇者: only flag generals remain → buff for surviving flag units
         p_non_flag = [i for i, u in enumerate(self.player.board) if u and not (
             self.player.flag_idx >= 0 and u.uid == self.player.board[self.player.flag_idx].uid)]

@@ -130,12 +130,22 @@ async def websocket_endpoint(ws: WebSocket, game_id: str, role: str):
         await ws.close(code=4003, reason=reason)
         return
 
-    # ── Step 3: Duplicate connection prevention (before accept) ─────────
+    # ── Step 3: Force-close old connection for this role (handles reconnection) ──
+    old_peer = ws_manager.get_peer(game_id, role)
+    if old_peer and old_peer.alive:
+        old_peer.alive = False
+        await old_peer.stop_sender()
+        try:
+            await old_peer.ws.close(code=4000, reason='重新连接')
+        except Exception:
+            pass
+
+    # ── Step 4: Register connection (allows same-token reconnection) ──────────
     if not register_connection(game_id, role, token):
-        await ws.close(code=4002, reason='重复连接：该角色已在线')
+        await ws.close(code=4002, reason='连接冲突：该角色已有不同令牌的连接')
         return
 
-    # ── Step 4: Accept handshake ────────────────────────────────────────
+    # ── Step 5: Accept handshake ──────────────────────────────────────────────
     await ws.accept()
     peer = ws_manager.register(game_id, role, ws)
     await peer.start_sender()
@@ -192,7 +202,7 @@ async def websocket_endpoint(ws: WebSocket, game_id: str, role: str):
         logger.error(f'[WS] Error: {e}', exc_info=True)
     finally:
         ws_manager.unregister(game_id, role)
-        unregister_connection(game_id, role)
+        unregister_connection(game_id, role, token)
         bs = battle_sessions.get(game_id)
         if bs:
             peers = ws_manager.get_peers(game_id)

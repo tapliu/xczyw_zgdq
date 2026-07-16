@@ -61,7 +61,8 @@ def register_connection(game_id: str, role: str, token: str) -> bool:
     Register an active WS connection.
 
     Returns True if registration succeeds, False if a connection for
-    (game_id, role) is already active (duplicate).
+    (game_id, role) with a DIFFERENT token is already active.
+    Same-token reconnections are always allowed (overwrites old entry).
     """
     key = (game_id, role)
     if key in _active_connections:
@@ -72,21 +73,25 @@ def register_connection(game_id: str, role: str, token: str) -> bool:
             logger.warning(f'[Auth] Connection collision: {game_id}/{role} '
                            f'registered with different token')
             return False
-        # Same token already connected → duplicate WS
-        logger.warning(f'[Auth] Duplicate WS connection rejected: '
-                       f'{game_id}/{role}')
-        return False
+        # Same token reconnecting — overwrite silently
     _active_connections[key] = token
     logger.info(f'[Auth] {role} connected to game {game_id}')
     return True
 
 
-def unregister_connection(game_id: str, role: str):
-    """Remove a WS connection from the active set."""
+def unregister_connection(game_id: str, role: str, expected_token: str = ''):
+    """Remove a WS connection from the active set.
+    Only removes if expected_token matches (prevents stale cleanup
+    from overwriting a reconnection)."""
     key = (game_id, role)
-    prev = _active_connections.pop(key, None)
-    if prev is not None:
-        logger.info(f'[Auth] {role} disconnected from game {game_id}')
+    stored = _active_connections.get(key)
+    if stored is None:
+        return
+    if expected_token and stored != expected_token:
+        # Stored token differs → a reconnection happened, don't touch it
+        return
+    _active_connections.pop(key, None)
+    logger.info(f'[Auth] {role} disconnected from game {game_id}')
 
 
 def get_active_connections(game_id: str) -> dict[str, str]:

@@ -94,10 +94,10 @@ header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webk
 .cell.has-ai .u-power{color:#ef5350}
 
 /* Single unit layout */
-.cell .u-power{position:absolute;top:12px;left:4px;font-size:4px;font-weight:700;line-height:1;color:#f5a623;text-shadow:0 0 4px rgba(0,0,0,.8);transform:rotate(-60deg);transform-origin:left center}
+.cell .u-power{position:absolute;top:15px;left:7px;font-size:4px;font-weight:700;line-height:1;color:#f5a623;text-shadow:0 0 4px rgba(0,0,0,.8);transform:rotate(-60deg);transform-origin:left center}
 .cell.has-player .u-power{color:#4fc3f7}
 .cell.has-ai .u-power{color:#ef5350}
-.cell .u-troops{position:absolute;top:17px;right:4px;font-size:4px;font-weight:700;line-height:1;text-shadow:0 0 4px rgba(0,0,0,.8);transform:rotate(60deg);transform-origin:right center}
+.cell .u-troops{position:absolute;top:19px;right:5px;font-size:4px;font-weight:700;line-height:1;text-shadow:0 0 4px rgba(0,0,0,.8);transform:rotate(60deg);transform-origin:right center}
 .cell.has-player .u-troops{color:#4fc3f7}
 .cell.has-ai .u-troops{color:#ef5350}
 .cell .u-avatar-wrap{display:flex;align-items:center;justify-content:center;gap:1px;margin-top:18px}

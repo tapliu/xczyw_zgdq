@@ -380,13 +380,8 @@ function generateAvatar(char, size) {
 // ==================== BOARD ====================
 function isActiveCell(i) { return true; }
 function isGuestView() { return !!(mpGameId && !mpIsHost); }
-// Map server cell index ↔ local display index (guest sees 180° rotation)
-function hexRotate180(i) {
-  const [q, r] = HEX_IDX_AXIAL[i];
-  return HEX_AXIAL_IDX.get((-q)+','+(-r)) ?? i;
-}
-function localCell(i) { return isGuestView() ? hexRotate180(i) : i; }
-function serverCell(i) { return isGuestView() ? hexRotate180(i) : i; }
+function localCell(i) { return i; }
+function serverCell(i) { return i; }
 
 function hexPx(i) {
   const [q, r] = HEX_IDX_AXIAL[i];

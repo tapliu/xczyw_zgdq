@@ -431,16 +431,23 @@ function initBoard() {
     const cx = p.x - minX + _boardPad;
     const cy = p.y - minY + _boardPad;
     const cell = document.createElement('div');
-    let zone;
-    if (AI_FLAG_CELLS.includes(i)) zone = 'ai-zone';
-    else if (PLAYER_FLAG_CELLS.includes(i)) zone = 'player-zone';
-    else if (HEX_FRONT_CELLS.includes(i)) zone = 'front-zone';
-    else if (VISUAL_AI_CELLS.includes(i)) zone = 'ai-zone';
-    else zone = 'player-zone';
+    const di = localCell(i);
+    // Flag zone is fixed to physical cell, independent of view
     let extra = '';
     if (AI_FLAG_CELLS.includes(i)) extra = ' ai-flag-zone';
     else if (PLAYER_FLAG_CELLS.includes(i)) extra = ' player-flag-zone';
-    cell.className = 'cell ' + zone + extra;
+    // Main zone matches data index, swapped in guest view
+    let z;
+    if (AI_FLAG_CELLS.includes(di)) z = 'ai-zone';
+    else if (PLAYER_FLAG_CELLS.includes(di)) z = 'player-zone';
+    else if (HEX_FRONT_CELLS.includes(di)) z = 'front-zone';
+    else if (VISUAL_AI_CELLS.includes(di)) z = 'ai-zone';
+    else z = 'player-zone';
+    if (isGuestView()) {
+      if (z === 'ai-zone') z = 'player-zone';
+      else if (z === 'player-zone') z = 'ai-zone';
+    }
+    cell.className = 'cell ' + z + extra;
     cell.dataset.index = i;
     cell.style.position = 'absolute';
     cell.style.left = (cx - HEX_CELL_DRAW_SIZE/2) + 'px';
@@ -489,9 +496,11 @@ function renderBoardFull() {
   const cells = document.querySelectorAll('.cell');
   cells.forEach((cell, i) => {
     const di = localCell(i);
+    // Flag zone is fixed to physical cell, independent of view
     let extra = '';
-    if (AI_FLAG_CELLS.includes(di)) extra = ' ai-flag-zone';
-    else if (PLAYER_FLAG_CELLS.includes(di)) extra = ' player-flag-zone';
+    if (AI_FLAG_CELLS.includes(i)) extra = ' ai-flag-zone';
+    else if (PLAYER_FLAG_CELLS.includes(i)) extra = ' player-flag-zone';
+    // Main zone matches data index, swapped in guest view
     let z;
     if (AI_FLAG_CELLS.includes(di)) z = 'ai-zone';
     else if (PLAYER_FLAG_CELLS.includes(di)) z = 'player-zone';

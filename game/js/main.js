@@ -380,8 +380,22 @@ function generateAvatar(char, size) {
 // ==================== BOARD ====================
 function isActiveCell(i) { return true; }
 function isGuestView() { return !!(mpGameId && !mpIsHost); }
-function localCell(i) { return i; }
-function serverCell(i) { return i; }
+// 180° rotation for guest view: mirror row position (r' = -1 - r) and
+// mirrored q-position within the row (preserves row count symmetry)
+function hexRotate180(i) {
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const r2 = -1 - r;
+  const cnt = HEX_ROW_COUNTS[r2];
+  if (!cnt) return i;
+  const qs = HEX_ROW_Q_STARTS[r] !== undefined ? HEX_ROW_Q_STARTS[r] : -Math.floor(HEX_ROW_COUNTS[r] / 2);
+  const pos = q - qs;
+  const qs2 = HEX_ROW_Q_STARTS[r2] !== undefined ? HEX_ROW_Q_STARTS[r2] : -Math.floor(cnt / 2);
+  const pos2 = cnt - 1 - pos;
+  const q2 = qs2 + pos2;
+  return HEX_AXIAL_IDX.get(q2 + ',' + r2) ?? i;
+}
+function localCell(i) { return isGuestView() ? hexRotate180(i) : i; }
+function serverCell(i) { return isGuestView() ? hexRotate180(i) : i; }
 
 function hexPx(i) {
   const [q, r] = HEX_IDX_AXIAL[i];

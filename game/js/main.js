@@ -562,13 +562,9 @@ function renderBoardFull() {
         const flagHtml = isFlag ? `<span class="u-flag-inner">${flagIcon(isPlayer ? '#ffd700' : '#4caf50')}</span>` : '';
         const factions = getFactions(u.char);
         const factionHtml = factions.length ? renderFactionBadges(factions, '/') : '';
-        cell.innerHTML = `<div class="u-avatar-wrap"><img class="u-avatar" src="${generateAvatar(u.char,14)}" alt="">${flagHtml}</div>
+        cell.innerHTML = `<div class="u-avatar-wrap"><span class="u-power">战力:${power}</span><img class="u-avatar" src="${generateAvatar(u.char,14)}" alt=""><span class="u-troops">兵力:${u.troops.toLocaleString()}</span>${flagHtml}</div>
           <span class="u-name">${u.char.name}</span>
-          <span class="u-faction">${factionHtml}</span>
-          <div class="u-stats-row">
-            <span class="u-power">战力:${power}</span>
-            <span class="u-troops">兵力:${u.troops.toLocaleString()}</span>
-          </div>`;
+          <span class="u-faction">${factionHtml}</span>`;
       }
     } else {
       if (selectedCell === i) cell.classList.add('highlight');

@@ -1734,23 +1734,6 @@
     "type": "全能"
   },
   {
-    "id": 103,
-    "name": "本多忠胜",
-    "leadership": 85,
-    "martial": 98,
-    "intelligence": 79,
-    "politics": 60,
-    "total_score": 322,
-    "rating": "C",
-    "wu_avg": 91.5,
-    "wen_avg": 69.5,
-    "max_stat": 98,
-    "wu_rating": "A",
-    "wen_rating": "D",
-    "total_rating": "S",
-    "type": "武将"
-  },
-  {
     "id": 104,
     "name": "榊原康政",
     "leadership": 85,

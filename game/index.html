@@ -118,6 +118,26 @@
 </div>
 </div>
 
+<div class="troop-modal" id="rpsModal">
+<div class="modal" style="max-width:400px">
+<div class="pick-hdr"><h2>石头剪刀布</h2></div>
+ <p style="color:#ccc;text-align:center;margin:8px 0">赢家优先抽卡</p>
+<div style="display:flex;gap:12px;justify-content:center;padding:12px">
+<button class="btn btn-rps" onclick="submitRps('rock')" style="font-size:28px;padding:16px 24px;background:#e94560;border:none;border-radius:8px;cursor:pointer">🪨<br><span style="font-size:14px">石头</span></button>
+<button class="btn btn-rps" onclick="submitRps('scissors')" style="font-size:28px;padding:16px 24px;background:#f5a623;border:none;border-radius:8px;cursor:pointer">✂️<br><span style="font-size:14px">剪刀</span></button>
+<button class="btn btn-rps" onclick="submitRps('paper')" style="font-size:28px;padding:16px 24px;background:#3498db;border:none;border-radius:8px;cursor:pointer">📄<br><span style="font-size:14px">布</span></button>
+</div>
+</div>
+</div>
+
+<div class="troop-modal" id="flagPickModal">
+<div class="modal" style="max-width:500px">
+<div class="pick-hdr"><h2>选择天王山旗本</h2></div>
+<p style="color:#ccc;text-align:center;margin:8px 0">在丰臣秀吉和明智光秀中选择一人作为你的旗本</p>
+<div class="pick-grid" id="flagPickGrid"></div>
+</div>
+</div>
+
 <div class="troop-modal" id="troopModal">
 <div class="modal">
 <h2 id="tmName">-</h2>

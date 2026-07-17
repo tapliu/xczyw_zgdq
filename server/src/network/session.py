@@ -11,6 +11,7 @@ import logging
 import time
 from typing import Callable, Optional
 
+from ..backend.state import HEX_SIZE
 from .connection import ConnectionManager, Peer, filter_state_for_role
 from .protocol import (
     C2S, S2C, InputOp, compute_delta,
@@ -297,7 +298,7 @@ class BattleSession:
             to_cell = inp['data'].get('to_cell')
             if unit_uid is None or to_cell is None:
                 return {'valid': False, 'error': 'missing unit_uid or to_cell'}
-            if not (0 <= to_cell < 64):
+            if not (0 <= to_cell < HEX_SIZE):
                 return {'valid': False, 'error': 'to_cell out of range'}
 
             unit = None

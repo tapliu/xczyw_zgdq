@@ -26,6 +26,14 @@ class PickCardRequest(BaseModel):
     char_id: int
 
 
+class RpsRequest(BaseModel):
+    choice: str
+
+
+class RpsFlagPickRequest(BaseModel):
+    char_id: int
+
+
 def get_game_or_404(game_id: str):
     game = games.get(game_id)
     if not game:
@@ -42,9 +50,8 @@ def new_game(body: NewGameRequest = None):
     game_id = str(uuid.uuid4())
     game = GameState(game_id)
     include_custom = body.include_custom_generals if body else True
-    game.reset_game(include_custom_generals=include_custom)
-    if body:
-        game.set_terrain(body.terrain)
+    terrain = body.terrain if body else 'normal'
+    game.reset_game(include_custom_generals=include_custom, terrain=terrain)
     games[game_id] = game
     return {'game_id': game_id, 'state': game.to_dict()}
 
@@ -52,6 +59,30 @@ def new_game(body: NewGameRequest = None):
 @router.get('/game/{game_id}')
 def get_game(game_id: str):
     game = get_game_or_404(game_id)
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/submit-rps')
+def submit_rps(game_id: str, body: RpsRequest):
+    game = get_game_or_404(game_id)
+    if game.game_phase != 'rps':
+        raise HTTPException(status_code=400, detail='不在此阶段')
+    try:
+        game.submit_rps('player', body.choice)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return game.to_dict()
+
+
+@router.post('/game/{game_id}/pick-tennozan-flag')
+def pick_tennozan_flag(game_id: str, body: RpsFlagPickRequest):
+    game = get_game_or_404(game_id)
+    if game.game_phase != 'rps_pick_flag':
+        raise HTTPException(status_code=400, detail='不在此阶段')
+    try:
+        game.pick_tennozan_flag('player', body.char_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return game.to_dict()
 
 

@@ -33,4 +33,6 @@ const api = {
   endPlacementGuest(gameId) { return this.request('POST', `/api/game/${gameId}/end-placement-guest`); },
   autoPlaceMp(gameId) { return this.request('POST', `/api/game/${gameId}/auto-place-mp`); },
   autoPlaceMySide(gameId, isHost) { return this.request('POST', `/api/game/${gameId}/auto-place-my-side`, { is_host: isHost }); },
+  submitRps(gameId, choice) { return this.request('POST', `/api/game/${gameId}/submit-rps`, { choice }); },
+  pickTennozanFlag(gameId, charId) { return this.request('POST', `/api/game/${gameId}/pick-tennozan-flag`, { char_id: charId }); },
 };

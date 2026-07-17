@@ -1,6 +1,4 @@
 // ==================== CONSTANTS ====================
-const BOARD_ROWS = 8, BOARD_COLS = 8;
-const PLAYER_ROWS = [4,5,6,7], AI_ROWS = [0,1,2,3];
 const PLACE_PER_ROUND = 5;
 const DRAW_PER_ROUND = 3;
 const INIT_DRAW = 10;
@@ -10,25 +8,164 @@ const TROOP_INCOME = 10000;
 const MAX_TOTAL_TROOPS = 300000;
 let s_hostPlacementReady = false;
 let s_guestPlacementReady = false;
-const TERRAIN_PATTERNS = {
-  normal: new Array(64).fill(true),
-  tennozan: (()=>{
-    const m = new Array(64).fill(false);
-    const actives = [8,6,4,2,2,4,6,8];
-    for (let r=0;r<8;r++) {
-      const n = actives[r], off = (8-n)/2;
-      for (let c=off;c<off+n;c++) m[r*8+c] = true;
-    }
-    return m;
-  })(),
-  nagashino: (()=>{
-    const m = new Array(64).fill(true);
-    for (let c=0;c<8;c++) { if (c===1||c===2||c===5||c===6) { m[3*8+c]=false; m[4*8+c]=false; } }
-    return m;
-  })()
+const MAX_UNITS_PER_SIDE = 12;
+function maxUnits() { return MAX_UNITS_PER_SIDE; }
+
+// Board definitions for different terrain modes
+const BOARD_DEFS = {
+  normal: {
+    HEX_SIZE: 52,
+    HEX_ROW_COUNTS: { [-4]:5, [-3]:6, [-2]:7, [-1]:8, [0]:8, [1]:7, [2]:6, [3]:5 },
+    HEX_ROW_Q_STARTS: { [-2]: -4, [-1]: -5, [0]: -6, [1]: -6, [2]: -6, [3]: -6 },
+    HEX_FRONT_CELLS: [16, 22, 29, 35],
+    AI_FLAG_CELLS: [0,1,2,5,6,7,11,12,13],
+    PLAYER_FLAG_CELLS: [38,39,40,44,45,46,49,50,51],
+    VISUAL_AI_CELLS: [3,4,8,9,10,14,15,18,19,20,21,26,27,28,34],
+    VISUAL_PLAYER_CELLS: [17,23,24,25,30,31,32,33,36,37,41,42,43,47,48],
+  },
+  nagashino: {
+    HEX_SIZE: 59,
+    HEX_ROW_COUNTS: { [-4]:5, [-3]:6, [-2]:7, [-1]:8, [0]:7, [1]:8, [2]:7, [3]:6, [4]:5 },
+    HEX_ROW_Q_STARTS: { [-4]:-1, [-3]:-2, [0]:-4, [1]:-5, [2]:-5, [3]:-5, [4]:-5 },
+    HEX_FRONT_CELLS: [26,28,29,30,32],
+    HEX_INACTIVE_CELLS: [27,31],
+    AI_FLAG_CELLS: [1,2,3,7,8,14],
+    PLAYER_FLAG_CELLS: [44,50,51,55,56,57],
+    VISUAL_AI_CELLS: [0,4,5,6,9,10,11,12,13,15,16,17,18,19,20,21,22,23,24,25],
+    VISUAL_PLAYER_CELLS: [33,34,35,36,37,38,39,40,41,42,43,45,46,47,48,49,52,53,54,58],
+  },
+  tennozan: {
+    HEX_SIZE: 43,
+    HEX_ROW_COUNTS: { [-4]:5, [-3]:6, [-2]:5, [-1]:4, [0]:3, [1]:4, [2]:5, [3]:6, [4]:5 },
+    HEX_ROW_Q_STARTS: { [-4]:-1, [-3]:-2, [0]:-2, [1]:-3, [2]:-4, [3]:-5, [4]:-5 },
+    HEX_FRONT_CELLS: [20,21,22],
+    AI_FLAG_CELLS: [1,2,3,7,8,13],
+    PLAYER_FLAG_CELLS: [29,34,35,39,40,41],
+    VISUAL_AI_CELLS: [0,4,5,6,9,10,11,12,14,15,16,17,18,19],
+    VISUAL_PLAYER_CELLS: [23,24,25,26,27,28,30,31,32,33,36,37,38,42],
+  },
 };
-const MAX_UNITS_PER_SIDE = 16;
-function maxUnits() { return terrainMode === 'tennozan' ? 8 : terrainMode === 'nagashino' ? 12 : MAX_UNITS_PER_SIDE; }
+
+// Mutable board state (switched by rebuildBoard based on terrainMode)
+let HEX_SIZE = 52;
+let HEX_ROW_COUNTS = BOARD_DEFS.normal.HEX_ROW_COUNTS;
+let HEX_ROW_Q_STARTS = BOARD_DEFS.normal.HEX_ROW_Q_STARTS;
+let HEX_AXIAL_IDX = new Map();
+let HEX_IDX_AXIAL = [];
+let HEX_DEPTH = [];
+let HEX_FRONT_CELLS = BOARD_DEFS.normal.HEX_FRONT_CELLS;
+let HEX_NEIGHBORS = [];
+let HEX_PLAYER_FORWARD = [];
+let HEX_AI_FORWARD = [];
+let HEX_PLAYER_CELLS = [];
+let HEX_AI_CELLS = [];
+let AI_FLAG_CELLS = BOARD_DEFS.normal.AI_FLAG_CELLS;
+let PLAYER_FLAG_CELLS = BOARD_DEFS.normal.PLAYER_FLAG_CELLS;
+let VISUAL_AI_CELLS = BOARD_DEFS.normal.VISUAL_AI_CELLS;
+let VISUAL_PLAYER_CELLS = BOARD_DEFS.normal.VISUAL_PLAYER_CELLS;
+let HEX_BOARD_EDGE = [];
+let HEX_FLAG_EDGE = [];
+let HEX_INACTIVE_CELLS = [];
+let HEX_FRONT_EDGE = [];
+let HEX_FRONT_SET = new Set();
+let HEX_ROTATE_180 = [];
+
+function hexRowCount(r) { return HEX_ROW_COUNTS[r] || 0; }
+
+function hexNeighbors(i) {
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const dirs = [[1,0],[0,1],[-1,1],[-1,0],[0,-1],[1,-1]];
+  const res = [];
+  for (const [dq, dr] of dirs) {
+    const ni = HEX_AXIAL_IDX.get((q+dq)+','+(r+dr));
+    if (ni !== undefined) res.push(ni);
+  }
+  return res;
+}
+
+function hexForward(i, isPlayer) {
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const dirs = isPlayer ? [[-1,0],[0,-1],[1,-1]] : [[1,0],[0,1],[-1,1]];
+  const res = [];
+  for (const [dq, dr] of dirs) {
+    const ni = HEX_AXIAL_IDX.get((q+dq)+','+(r+dr));
+    if (ni !== undefined) res.push(ni);
+  }
+  return res;
+}
+
+function toIdx(q, r) { return HEX_AXIAL_IDX.get(q+','+r); }
+
+function _buildRotationTable() {
+  const tbl = [];
+  for (let i = 0; i < HEX_SIZE; i++) {
+    const [q, r] = HEX_IDX_AXIAL[i];
+    const r2 = -1 - r;
+    const cnt = HEX_ROW_COUNTS[r2];
+    if (!cnt) { tbl[i] = i; continue; }
+    const qs = HEX_ROW_Q_STARTS[r] !== undefined ? HEX_ROW_Q_STARTS[r] : -Math.floor(HEX_ROW_COUNTS[r] / 2);
+    const pos = q - qs;
+    const qs2 = HEX_ROW_Q_STARTS[r2] !== undefined ? HEX_ROW_Q_STARTS[r2] : -Math.floor(cnt / 2);
+    const pos2 = cnt - 1 - pos;
+    const q2 = qs2 + pos2;
+    tbl[i] = HEX_AXIAL_IDX.get(q2 + ',' + r2) ?? i;
+  }
+  HEX_ROTATE_180 = tbl;
+}
+
+function rebuildBoard(mode) {
+  const def = BOARD_DEFS[mode] || BOARD_DEFS.normal;
+  HEX_SIZE = def.HEX_SIZE;
+  HEX_ROW_COUNTS = def.HEX_ROW_COUNTS;
+  HEX_ROW_Q_STARTS = def.HEX_ROW_Q_STARTS;
+  // Rebuild axial index maps
+  HEX_AXIAL_IDX = new Map();
+  HEX_IDX_AXIAL = [];
+  let hidx = 0;
+  const rList = Object.keys(HEX_ROW_COUNTS).map(Number).sort((a,b) => a-b);
+  for (const r of rList) {
+    const count = hexRowCount(r);
+    const qStart = HEX_ROW_Q_STARTS[r] !== undefined ? HEX_ROW_Q_STARTS[r] : -Math.floor(count / 2);
+    for (let q = qStart; q < qStart + count; q++) {
+      HEX_AXIAL_IDX.set(q+','+r, hidx);
+      HEX_IDX_AXIAL[hidx] = [q, r];
+      hidx++;
+    }
+  }
+  // Rebuild zone arrays
+  HEX_FRONT_CELLS = def.HEX_FRONT_CELLS;
+  AI_FLAG_CELLS = def.AI_FLAG_CELLS;
+  PLAYER_FLAG_CELLS = def.PLAYER_FLAG_CELLS;
+  VISUAL_AI_CELLS = def.VISUAL_AI_CELLS;
+  VISUAL_PLAYER_CELLS = def.VISUAL_PLAYER_CELLS;
+  HEX_INACTIVE_CELLS = def.HEX_INACTIVE_CELLS || [];
+  // Rebuild derived arrays
+  HEX_DEPTH = HEX_IDX_AXIAL.map(([q, r]) => 2 * r + q);
+  HEX_NEIGHBORS = HEX_IDX_AXIAL.map((_, i) => hexNeighbors(i));
+  HEX_PLAYER_FORWARD = HEX_IDX_AXIAL.map((_, i) => hexForward(i, true));
+  HEX_AI_FORWARD = HEX_IDX_AXIAL.map((_, i) => hexForward(i, false));
+  HEX_PLAYER_CELLS = HEX_IDX_AXIAL.map((_, i) => i).filter(i => HEX_DEPTH[i] > 0);
+  HEX_AI_CELLS = HEX_IDX_AXIAL.map((_, i) => i).filter(i => HEX_DEPTH[i] < 0);
+  // Rebuild edge arrays
+  HEX_BOARD_EDGE = HEX_IDX_AXIAL.map((_, i) => i).filter(i => HEX_NEIGHBORS[i].length < 6);
+  const allFlagSet = new Set([...AI_FLAG_CELLS, ...PLAYER_FLAG_CELLS]);
+  HEX_FLAG_EDGE = HEX_IDX_AXIAL.map((_, i) => i).filter(i =>
+    allFlagSet.has(i) && HEX_NEIGHBORS[i].some(ni => !allFlagSet.has(ni))
+  );
+  HEX_FRONT_SET = new Set(HEX_FRONT_CELLS);
+  HEX_FRONT_EDGE = HEX_FRONT_CELLS.filter(i =>
+    HEX_NEIGHBORS[i].some(ni => !HEX_FRONT_SET.has(ni))
+  );
+  // Rebuild rotation table
+  _buildRotationTable();
+}
+
+// Initialize with default board (normal)
+rebuildBoard('normal');
+
+// Cell spacing and visual size for rendering
+const HEX_CELL_SIZE = 100;
+const HEX_CELL_DRAW_SIZE = HEX_CELL_SIZE;
 const RATING_COLORS = { 'S+':'#8b0000','S':'#e94560','A':'#8b4513','B':'#ffd700','C':'#2e8b57','D':'#1e90ff' };
 const TYPE_COLORS = { '全能':'#f5a623','武将':'#e94560','文臣':'#3498db','特才':'#9b59b6' };
 const MON_CRESTS = ['◈','◆','★','✿','❖','⚘','✧','❀','✦','♰'];
@@ -77,12 +214,14 @@ function flagIcon(color) {
 // ==================== STATE ====================
 let gameId = null;
 let round = 0, gamePhase = 'idle', drawPileCount = 100, placedThisTurn = 0;
-let player = { collection: [], board: Array(64).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
-let ai = { collection: [], board: Array(64).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
+let player = { collection: [], board: Array(HEX_SIZE).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
+let ai = { collection: [], board: Array(HEX_SIZE).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
 let selectedChar = null, selectedCell = null;
-let playerCatFilter = 'all', aiCatFilter = 'all', playerSortBy = 'default', aiSortBy = 'default', editorSortBy = 'id';
+let playerCatFilter = 'all', aiCatFilter = 'all', spectatorCatFilter = 'all', playerSortBy = 'default', aiSortBy = 'default', spectatorSortBy = 'default', editorSortBy = 'id';
 let avatarCache = {};
 let playerCooldowns = [], aiCooldowns = [];
+let firstScalerUid = null, firstScalerRound = null;
+let loneBravePlayer = false, loneBraveAi = false, loneBraveRound = null;
 let autoPlay = false;
 let _isAutoPlaying = false;
 let quickDrawMode = false;
@@ -91,13 +230,16 @@ let spectatorPool = [];
 let pendingFlagPicks = 0;
 let combatStats = {}, uidCharMap = {}, uidSideMap = {};
 let terrainMode = 'normal';
+let rpsPlayerChoice = null;
+let rpsAiChoice = null;
+let rpsWinner = null;
 
 // ==================== APPLY STATE FROM SERVER ====================
 function normalizeSide(obj) {
   if (!obj) return obj;
   return {
     collection: obj.collection || [],
-    board: obj.board || Array(64).fill(null),
+    board: obj.board || Array(HEX_SIZE).fill(null),
     troops: obj.troops || 0,
     flagIdx: obj.flag_idx ?? obj.flagIdx ?? -1,
     placed: obj.placed ?? 0,
@@ -144,9 +286,27 @@ function applyStateFromServer(data) {
   if (s.combat_stats ?? s.combatStats) combatStats = s.combat_stats ?? s.combatStats;
   if (s.uid_char_map ?? s.uidCharMap) uidCharMap = s.uid_char_map ?? s.uidCharMap;
   if (s.uid_side_map ?? s.uidSideMap) uidSideMap = s.uid_side_map ?? s.uidSideMap;
-  terrainMode = s.terrain_mode ?? s.terrainMode ?? terrainMode;
+  const newTerrain = s.terrain_mode ?? s.terrainMode ?? terrainMode;
+  if (newTerrain !== terrainMode) {
+    terrainMode = newTerrain;
+    rebuildBoard(terrainMode);
+    initBoard();
+    renderBoardFull();
+    updateUI();
+    updateSpectatorGrid();
+  } else {
+    terrainMode = newTerrain;
+  }
+  if (s.rps_player_choice !== undefined) rpsPlayerChoice = s.rps_player_choice;
+  if (s.rps_ai_choice !== undefined) rpsAiChoice = s.rps_ai_choice;
+  if (s.rps_winner !== undefined) rpsWinner = s.rps_winner;
   s_hostPlacementReady = s.host_placement_ready ?? false;
   s_guestPlacementReady = s.guest_placement_ready ?? false;
+  if (s.first_scaler_uid !== undefined) firstScalerUid = s.first_scaler_uid;
+  if (s.first_scaler_round !== undefined) firstScalerRound = s.first_scaler_round;
+  if (s.lone_brave_player !== undefined) loneBravePlayer = s.lone_brave_player;
+  if (s.lone_brave_ai !== undefined) loneBraveAi = s.lone_brave_ai;
+  if (s.lone_brave_round !== undefined) loneBraveRound = s.lone_brave_round;
   const logs = s.battle_log ?? s.battleLog;
   if (logs && logs.length) {
     logs.forEach(entry => addBattleLog(entry.msg || entry.message, entry.type || 'info'));
@@ -178,6 +338,12 @@ function applyStateFromServer(data) {
     setTimeout(() => showVictory(s.winner), 500);
     if (autoPlay) toggleAutoPlay();
     MusicManager.play(s.winner ? 'victory' : 'defeat');
+  } else if (gamePhase === 'rps') {
+    setPhase('🪨 石头剪刀布！决定先手抽卡顺序');
+    if (!mpGameId && rpsPlayerChoice === null && !_isAutoPlaying) showRpsModal();
+  } else if (gamePhase === 'rps_pick_flag') {
+    setPhase('🚩 选择天王山旗本武将');
+    if (!mpGameId && rpsWinner === 'player' && !_isAutoPlaying) showTennozanFlagPickModal();
   } else if (gamePhase === 'idle' || gamePhase === 'draw' || gamePhase === 'pick_card') {
     if (!mpGameId && (gamePhase === 'idle' || gamePhase === 'draw')) setTimeout(() => { if ((gamePhase==='idle'||gamePhase==='draw') && !_isAutoPlaying) drawPhase(); }, 100);
   } else if (gamePhase === 'place_player' && !mpGameId) {
@@ -217,6 +383,10 @@ function updateButtonStates() {
     if (btnEnd) btnEnd.disabled = true;
     if (btnAuto) btnAuto.disabled = true;
     if (btnPerm) btnPerm.disabled = true;
+  } else if (gamePhase === 'rps' || gamePhase === 'rps_pick_flag') {
+    if (btnEnd) btnEnd.disabled = true;
+    if (btnAuto) btnAuto.disabled = false;
+    if (btnPerm) btnPerm.disabled = false;
   } else if (gamePhase === 'idle' || gamePhase === 'draw' || gamePhase === 'pick_card') {
     if (btnEnd) btnEnd.disabled = false;
     if (btnAuto) btnAuto.disabled = false;
@@ -243,7 +413,7 @@ function generateAvatar(char, size) {
   if (avatarCache[key]) return avatarCache[key];
   // Use webp portrait when available
   const pid = char.avatarId || char.id;
-  if (pid >= 1 && pid <= 100 || pid >= 501 && pid <= 520) {
+  if (pid >= 1 && pid <= 105 || pid >= 501 && pid <= 520) {
     avatarCache[key] = 'portraits/' + pid + '.webp';
     return avatarCache[key];
   }
@@ -283,27 +453,113 @@ function generateAvatar(char, size) {
 }
 
 // ==================== BOARD ====================
-function idx(r,c){return r*BOARD_COLS+c}
-function rowOf(i){return Math.floor(i/BOARD_COLS)}
-function colOf(i){return i%BOARD_COLS}
-function inRange(r,c){return r>=0&&r<BOARD_ROWS&&c>=0&&c<BOARD_COLS}
-function isActiveCell(i) { return TERRAIN_PATTERNS[terrainMode][i]; }
+function isActiveCell(i) { return !HEX_INACTIVE_CELLS.includes(i); }
 function isGuestView() { return !!(mpGameId && !mpIsHost); }
-// Map server cell index ↔ local display index (guest sees 180° rotation)
-function localCell(i) { return isGuestView() ? (63 - i) : i; }
-function serverCell(i) { return isGuestView() ? (63 - i) : i; }
+// 180° rotation lookup for guest view (precomputed for irregular hourglass shape)
+function hexRotate180(i) { return HEX_ROTATE_180[i]; }
+function localCell(i) { return isGuestView() ? hexRotate180(i) : i; }
+function serverCell(i) { return isGuestView() ? hexRotate180(i) : i; }
+
+function hexPx(i) {
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const s = HEX_CELL_SIZE / 2;
+  return {
+    x: s * (3/2 * q),
+    y: s * (Math.sqrt(3) * r + Math.sqrt(3)/2 * q)
+  };
+}
+
+let _boardEl = null, _boardBw = 0, _boardBh = 0, _boardPad = 0, _boardCenters = [];
 
 function initBoard() {
   const el = document.getElementById('board');
-  el.innerHTML = '<div class="divider"></div>';
-  for (let i = 0; i < 64; i++) {
+  el.innerHTML = '';
+  _boardEl = el;
+
+  // Compute board pixel dimensions (cached)
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  _boardCenters = [];
+  for (let i = 0; i < HEX_SIZE; i++) {
+    const p = hexPx(i);
+    _boardCenters.push(p);
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  _boardPad = HEX_CELL_DRAW_SIZE / 2 + 4;
+  _boardBw = maxX - minX + _boardPad * 2;
+  _boardBh = maxY - minY + _boardPad * 2;
+
+  // Grid container — centered inside the board via flex
+  const grid = document.createElement('div');
+  grid.className = 'board-grid';
+  grid.style.cssText = `position:relative;width:${_boardBw}px;height:${_boardBh}px;flex-shrink:0`;
+  el.appendChild(grid);
+
+  // Create cells (one-time)
+  for (let i = 0; i < HEX_SIZE; i++) {
+    const p = _boardCenters[i];
+    const cx = p.x - minX + _boardPad;
+    const cy = p.y - minY + _boardPad;
     const cell = document.createElement('div');
-    cell.className = 'cell ' + (rowOf(i) < 4 ? 'ai-zone' : 'player-zone');
+    const di = localCell(i);
+    // Flag zone is fixed to physical cell, independent of view
+    let extra = '';
+    if (AI_FLAG_CELLS.includes(i)) extra = ' ai-flag-zone';
+    else if (PLAYER_FLAG_CELLS.includes(i)) extra = ' player-flag-zone';
+    // Main zone matches data index, swapped in guest view
+    let z;
+    if (AI_FLAG_CELLS.includes(di)) z = 'ai-zone';
+    else if (PLAYER_FLAG_CELLS.includes(di)) z = 'player-zone';
+    else if (HEX_FRONT_CELLS.includes(di)) z = 'front-zone';
+    else if (VISUAL_AI_CELLS.includes(di)) z = 'ai-zone';
+    else z = 'player-zone';
+    if (isGuestView()) {
+      if (z === 'ai-zone') z = 'player-zone';
+      else if (z === 'player-zone') z = 'ai-zone';
+    }
+    let cls = 'cell ' + z + extra;
+    if (HEX_BOARD_EDGE.includes(i)) cls += ' board-edge';
+    if (HEX_FLAG_EDGE.includes(i)) cls += ' flag-zone-edge';
+    if (HEX_FRONT_EDGE.includes(di)) cls += ' front-edge';
+    cell.className = cls;
     cell.dataset.index = i;
+    cell.style.position = 'absolute';
+    cell.style.left = (cx - HEX_CELL_DRAW_SIZE/2) + 'px';
+    cell.style.top = (cy - HEX_CELL_DRAW_SIZE/2) + 'px';
+    cell.style.width = HEX_CELL_DRAW_SIZE + 'px';
+    cell.style.height = HEX_CELL_DRAW_SIZE + 'px';
     cell.addEventListener('click', () => onCellClick(i));
     cell.addEventListener('contextmenu', e => { e.preventDefault(); onRightClick(i); });
-    el.appendChild(cell);
+    grid.appendChild(cell);
   }
+
+  // Apply responsive layout
+  _applyBoardLayout();
+
+  // Listen for resize / orientation change
+  window.addEventListener('resize', _applyBoardLayout);
+  if (screen.orientation) {
+    screen.orientation.addEventListener('change', _applyBoardLayout);
+  }
+}
+
+function _applyBoardLayout() {
+  if (!_boardEl) return;
+  const container = _boardEl.closest('.container');
+  const cw = container ? container.clientWidth : window.innerWidth;
+  const layoutW = Math.max(100, cw - 34);
+  const wrapper = _boardEl.parentElement;
+  wrapper.style.width = (layoutW * 0.5) + 'px';
+  wrapper.style.flex = 'none';
+  const rp = document.querySelector('.right-panel');
+  if (rp) rp.style.flex = '0 0 ' + (layoutW * 0.5) + 'px';
+  // Board fills the wrapper; grid centered inside via flex
+  _boardEl.style.width = '100%';
+  _boardEl.style.height = _boardBh + 'px';
+  _boardEl.style.transform = 'none';
+  _boardEl.style.margin = '0';
 }
 
 function getUnit(idx) { const d = localCell(idx); return player.board[d] || ai.board[d]; }
@@ -313,10 +569,26 @@ function renderBoardFull() {
   const cells = document.querySelectorAll('.cell');
   cells.forEach((cell, i) => {
     const di = localCell(i);
-    const origRow = rowOf(di);
-    cell.className = 'cell ' + (isGuestView()
-      ? (origRow < 4 ? 'player-zone' : 'ai-zone')
-      : (origRow < 4 ? 'ai-zone' : 'player-zone'));
+    // Flag zone is fixed to physical cell, independent of view
+    let extra = '';
+    if (AI_FLAG_CELLS.includes(i)) extra = ' ai-flag-zone';
+    else if (PLAYER_FLAG_CELLS.includes(i)) extra = ' player-flag-zone';
+    // Main zone matches data index, swapped in guest view
+    let z;
+    if (AI_FLAG_CELLS.includes(di)) z = 'ai-zone';
+    else if (PLAYER_FLAG_CELLS.includes(di)) z = 'player-zone';
+    else if (HEX_FRONT_CELLS.includes(di)) z = 'front-zone';
+    else if (VISUAL_AI_CELLS.includes(di)) z = 'ai-zone';
+    else z = 'player-zone';
+    if (isGuestView()) {
+      if (z === 'ai-zone') z = 'player-zone';
+      else if (z === 'player-zone') z = 'ai-zone';
+    }
+    let cls = 'cell ' + z + extra;
+    if (HEX_BOARD_EDGE.includes(i)) cls += ' board-edge';
+    if (HEX_FLAG_EDGE.includes(i)) cls += ' flag-zone-edge';
+    if (HEX_FRONT_EDGE.includes(di)) cls += ' front-edge';
+    cell.className = cls;
     if (!isActiveCell(di)) cell.classList.add('inactive');
     let pu = player.board[di], au = ai.board[di];
     // In simultaneous multiplayer placement, hide only newly placed opponent units
@@ -335,22 +607,17 @@ function renderBoardFull() {
         const pFlag = isGuestView() ? (ai.flagIdx === di) : (player.flagIdx === di);
         const aFlag = isGuestView() ? (player.flagIdx === di) : (ai.flagIdx === di);
         if (pFlag||aFlag) cell.classList.add('flag-cell');
-        const pPower = Math.round(calcPower(di, true)), aPower2 = Math.round(calcPower(di, false));
-        const pfBadges = getFactions(pu.char).map(f => `<span class="bu-faction-badge player-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
-        const afBadges = getFactions(au.char).map(f => `<span class="bu-faction-badge ai-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
-        cell.innerHTML = `${pfBadges}${afBadges}<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,18)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?flagIcon('#ffd700'):''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?flagIcon('#4caf50'):''}${generateAvatar(au.char,18)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
+        cell.innerHTML = `<div class="both-units"><span class="bu-player">▲${generateAvatar(pu.char,24)}<span class="bu-name">${pu.char.name}</span><span class="bu-troops">${pu.troops.toLocaleString()}</span>${pFlag?flagIcon('#ffd700'):''}</span><span class="bu-vs">⚔</span><span class="bu-ai">${aFlag?flagIcon('#4caf50'):''}${generateAvatar(au.char,24)}<span class="bu-name">${au.char.name}</span><span class="bu-troops">${au.troops.toLocaleString()}</span>▼</span></div>`;
       } else {
         const isFlag = (isPlayer && (isGuestView() ? ai.flagIdx === di : player.flagIdx === di)) || (!isPlayer && (isGuestView() ? player.flagIdx === di : ai.flagIdx === di));
         if (isFlag) cell.classList.add('flag-cell');
-        const flagIconSvg = isFlag ? `<span class="u-flag-abs">${flagIcon(isPlayer ? '#ffd700' : '#4caf50')}</span>` : '';
-        const dirIcon = isPlayer ? '▲' : '▼';
         const power = Math.round(calcPower(di, isPlayer));
-        const fBadges = getFactions(u.char).map(f => `<span class="u-faction-badge" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
-        cell.innerHTML = `${fBadges}${flagIconSvg}<img class="u-avatar" src="${generateAvatar(u.char,24)}" alt="">
+        const flagHtml = isFlag ? `<span class="u-flag-inner">${flagIcon(isPlayer ? '#ffd700' : '#4caf50')}</span>` : '';
+        const factions = getFactions(u.char);
+        const factionHtml = factions.length ? renderFactionBadges(factions, '/') : '';
+        cell.innerHTML = `<div class="u-avatar-wrap"><span class="u-power">战力:${power}</span><img class="u-avatar" src="${generateAvatar(u.char,28)}" alt=""><span class="u-troops">兵力:${u.troops.toLocaleString()}</span>${flagHtml}</div>
           <span class="u-name">${u.char.name}</span>
-          <span class="u-power">${power}</span>
-          <span class="u-troops">${u.troops.toLocaleString()}</span>
-          <span class="u-owner">${dirIcon}</span>`;
+          <span class="u-faction">${factionHtml}</span>`;
       }
     } else {
       if (selectedCell === i) cell.classList.add('highlight');
@@ -369,9 +636,11 @@ function onCellClick(index) {
   const di = localCell(index);
   const u = getUnit(index);
   if (!u) {
-    const canPlace = isGuestView()
-      ? ((gamePhase === 'place_guest' || gamePhase === 'multiplayer_place') && placedThisTurn < PLACE_PER_ROUND && AI_ROWS.includes(rowOf(di)))
-      : ((gamePhase === 'place_player' || gamePhase === 'multiplayer_place') && placedThisTurn < PLACE_PER_ROUND && PLAYER_ROWS.includes(rowOf(di)));
+    const isPlayerSide = isGuestView() ? false : true;
+    const playerPlaceCells = new Set([...PLAYER_FLAG_CELLS, ...VISUAL_PLAYER_CELLS]);
+    const aiPlaceCells = new Set([...AI_FLAG_CELLS, ...VISUAL_AI_CELLS]);
+    const canPlace = (isPlayerSide ? playerPlaceCells.has(di) : aiPlaceCells.has(di))
+      && ((gamePhase === 'place_player' || gamePhase === 'place_guest' || gamePhase === 'multiplayer_place') && placedThisTurn < PLACE_PER_ROUND);
     if (canPlace) {
       if (!isActiveCell(di)) { setPhase('❌ 此格不可用'); return; }
       if ((isGuestView() ? ai.board.filter(u=>u).length : player.board.filter(u=>u).length) >= maxUnits()) { setPhase('❌ 已达上限'+maxUnits()+'名武将'); return; }
@@ -392,20 +661,18 @@ function onRightClick(index) {
 }
 
 // ==================== COMBAT DISPLAY UTILITIES ====================
-function getNeighborIndices(i) {
-  const r = rowOf(i), c = colOf(i), res = [];
-  for (let dr = -1; dr <= 1; dr++)
-    for (let dc = -1; dc <= 1; dc++)
-      if (dr!==0||dc!==0) { const nr=r+dr,nc=c+dc; if (inRange(nr,nc)) res.push(idx(nr,nc)); }
-  return res;
-}
+function getNeighborIndices(i) { return HEX_NEIGHBORS[i]; }
 
 function getConeIndices(i, isPlayer) {
-  const r = rowOf(i), c = colOf(i);
-  const dir = isPlayer ? -1 : 1;
+  const [q, r] = HEX_IDX_AXIAL[i];
+  const dirs = isPlayer ? [[-1,0],[0,-1],[1,-1]] : [[1,0],[0,1],[-1,1]];
   const res = [];
-  for (let dc = -1; dc <= 1; dc++) { const nr=r+dir,nc=c+dc; if (inRange(nr,nc)) res.push(idx(nr,nc)); }
-  for (let dc = -2; dc <= 2; dc++) { const nr=r+dir*2,nc=c+dc; if (inRange(nr,nc)) res.push(idx(nr,nc)); }
+  for (const [dq, dr] of dirs) {
+    const f1 = HEX_AXIAL_IDX.get((q+dq)+','+(r+dr));
+    if (f1 !== undefined) res.push(f1);
+    const f2 = HEX_AXIAL_IDX.get((q+2*dq)+','+(r+2*dr));
+    if (f2 !== undefined) res.push(f2);
+  }
   return res;
 }
 
@@ -445,7 +712,7 @@ function calcPower(index, isPlayer) {
     }
   });
   power += u.char.leadership * flagMul * 0.05;
-  for (let ei=0;ei<64;ei++) {
+  for (let ei=0;ei<HEX_SIZE;ei++) {
     const eu = enBoard[ei];
     if (!eu) continue;
     const cone = getConeIndices(ei, !isPlayer);
@@ -455,20 +722,47 @@ function calcPower(index, isPlayer) {
   const isLord = u.char.lord_name === u.char.name;
   if (isLord && !hasQunxiong) {
     let count = 0;
-    for (let i=0;i<64;i++) {
+    for (let i=0;i<HEX_SIZE;i++) {
       const fu = myBoard[i];
       if (fu && fu !== u && uFactions.includes(fu.char.faction)) count++;
     }
     power *= (1 + count * 0.05);
   }
+  // 居高临下: unit in front zone → +5%
+  if (HEX_FRONT_CELLS.indexOf(index) >= 0) {
+    power *= 1.05;
+  }
+  // 先登: first scaler → +10% (lasts 5 rounds)
+  if (u.uid === firstScalerUid && firstScalerRound !== null && round <= firstScalerRound + 5) {
+    power *= 1.10;
+  }
+  // 孤勇者: lone flag general → +50% (lasts 10 rounds)
+  if (loneBraveRound !== null && round <= loneBraveRound + 10) {
+    if (isPlayer && loneBravePlayer && isFlagUnit(index, true)) {
+      power *= 1.50;
+    }
+    if (!isPlayer && loneBraveAi && isFlagUnit(index, false)) {
+      power *= 1.50;
+    }
+  }
   return Math.max(1, Math.round(power));
 }
 
 function isBehindEnemyLine(idx, isPlayer) {
-  const r=rowOf(idx), c=colOf(idx);
-  const enBoard=isPlayer?ai.board:player.board;
-  if (isPlayer) { for (let rr=r+1;rr<8;rr++) if (enBoard[rr*8+c]) return true; }
-  else { for (let rr=r-1;rr>=0;rr--) if (enBoard[rr*8+c]) return true; }
+  const fwd = isPlayer ? HEX_AI_FORWARD : HEX_PLAYER_FORWARD;
+  const enBoard = isPlayer ? ai.board : player.board;
+  // BFS up to 4 steps along forward direction
+  let visited = new Set([idx]);
+  let queue = [...fwd[idx]];
+  while (queue.length) {
+    const ni = queue.shift();
+    if (ni === undefined || visited.has(ni)) continue;
+    visited.add(ni);
+    if (enBoard[ni]) return true;
+    for (const f of fwd[ni]) {
+      if (f !== undefined && !visited.has(f)) queue.push(f);
+    }
+  }
   return false;
 }
 
@@ -486,11 +780,11 @@ function showDetailUnit(u, isPlayer, idx) {
       <img class="d-avatar" src="${generateAvatar(char,44)}" alt="">
       <div class="d-info">
         <div class="dname" style="color:${rc}">${char.name} ${isFlag?'🚩':''}</div>
-        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''}${getFactions(char).length ? ' · ' + renderFactionBadges(getFactions(char)) : ''}${char.lord_name === char.name ? ' · 👑 主公' : ''} · 战力 ${power}</div>${getFactions(char).length ? `<div class="d-faction">${renderFactionBadges(getFactions(char), ' ')}</div>` : ''}
+        <div class="dmeta">${char.type||''} · ${char.rating||''}${char.identity?' · '+char.identity:''}${getFactions(char).length ? ' · ' + renderFactionBadges(getFactions(char)) : ''}${char.lord_name === char.name ? ' · 👑 主公' : ''}</div>${getFactions(char).length ? `<div class="d-faction">${renderFactionBadges(getFactions(char), ' ')}</div>` : ''}
         ${char.note ? `<div class="dnote">${escHtml(char.note)}</div>` : ''}
       </div>
     </div>
-    <div class="d-troops ${isPlayer?'player':'ai'}">⚔ ${u.troops.toLocaleString()} 兵力</div>
+    <div class="d-troops ${isPlayer?'player':'ai'}">⚔ ${power} 👤 ${u.troops.toLocaleString()}</div>
     ${statBar('统率',char.leadership,'#e94560')}
     ${statBar('武力',char.martial,'#f5a623')}
     ${statBar('智力',char.intelligence,'#2ecc71')}
@@ -709,6 +1003,7 @@ function updateAiCollectionGrid() {
   document.getElementById('aiDeployCount').textContent = `出阵武将：${deployed}  后备武将：${total-deployed}`;
   const enemyCooldowns = isGuestView() ? playerCooldowns : aiCooldowns;
   const enemyCatFilter = isGuestView() ? playerCatFilter : aiCatFilter;
+  const enemySortBy = isGuestView() ? playerSortBy : aiSortBy;
   if (!enemy.collection || !enemy.collection.length) { el.innerHTML=''; empty.style.display='block'; return; }
   empty.style.display='none';
   let filtered = [...enemy.collection];
@@ -727,6 +1022,9 @@ function updateAiCollectionGrid() {
     const bGrp=bDead?3:(bCd?2:(bOn?1:0));
     if (aGrp!==bGrp) return aGrp-bGrp;
     if (aFg !== bFg) return aFg ? -1 : 1;
+    if (enemySortBy !== 'default') {
+      return (b[enemySortBy]||0) - (a[enemySortBy]||0);
+    }
     const ra=ratingOrder[a.rating]??9, rb=ratingOrder[b.rating]??9;
     if (ra!==rb) return ra-rb;
     return totalScore(b)-totalScore(a);
@@ -754,7 +1052,8 @@ function updateAiCollectionGrid() {
       : isFlagGen ? '<div class="freeze-badge" style="background:rgba(100,50,0,0.7);color:#f5a623">🚩</div>'
       : '';
     const factionTag = getFactions(c).map(f => `<span class="c-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
-    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div>${factionTag ? `<div class="cmeta">${factionTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
+    const showAttr = enemySortBy !== 'default' ? `<div class="cattr">${c[enemySortBy]}</div>` : `<div class="cattr">${cTotal}</div>`;
+    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div>${factionTag ? `<div class="cmeta">${factionTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}${showAttr}${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
     div.addEventListener('click', ()=> showCharDetail(c, onBoard, false));
     el.appendChild(div);
   });
@@ -764,25 +1063,30 @@ function updateAiCollectionGrid() {
 function updateSpectatorGrid() {
   const el = document.getElementById('spectatorGrid');
   const section = document.getElementById('spectatorSection');
-  const pSurvive = player.collection ? player.collection.filter(c => !isDead(c.id)).length : 0;
-  const canRecruit = pSurvive < 10;
   if (!spectatorPool || !spectatorPool.length) { section.style.display='none'; return; }
   section.style.display='block';
-  document.getElementById('specHint').textContent = canRecruit ? `己方存活${pSurvive}/10 · 点击招募` : `己方存活${pSurvive}/10`;
+  document.getElementById('specHint').textContent = `观战武将：${spectatorPool.length}`;
   el.innerHTML = '';
+  let filtered = [...spectatorPool];
+  if (spectatorCatFilter !== 'all') filtered = filtered.filter(c => c.type === spectatorCatFilter);
   const ratingOrder={ 'S+':0,'S':1,'A':2,'B':3,'C':4,'D':5 };
   const totalScore = ch => ch.leadership+ch.martial+ch.intelligence+ch.politics;
-  const sorted = [...spectatorPool].sort((a,b) => {
+  filtered.sort((a,b) => {
+    if (spectatorSortBy !== 'default') {
+      return (b[spectatorSortBy]||0) - (a[spectatorSortBy]||0);
+    }
     const ra=ratingOrder[a.rating]??9, rb=ratingOrder[b.rating]??9;
     if (ra!==rb) return ra-rb;
     return totalScore(b)-totalScore(a);
   });
-  sorted.forEach(c => {
+  const canRecruit = (player.collection ? player.collection.filter(c => !isDead(c.id)).length : 0) < 10;
+  filtered.forEach(c => {
     const div = document.createElement('div');
     div.className = 'char-card';
     const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
     const fTag = getFactions(c).map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('/');
-    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div>${fTag ? `<div class="cmeta">${fTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>`;
+    const showAttr = spectatorSortBy !== 'default' ? `<div class="cattr">${c[spectatorSortBy]}</div>` : `<div class="cattr">${cTotal}</div>`;
+    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div>${fTag ? `<div class="cmeta">${fTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}${showAttr}`;
     if (canRecruit) { html += '<div style="font-size:9px;color:#4caf50;text-align:center;cursor:pointer">招募</div>'; }
     div.innerHTML = html;
     div.addEventListener('click', (e) => {
@@ -949,7 +1253,7 @@ function showVictory(win) {
 
 function totalTroops(side) {
   let t = 0;
-  for (let i=0;i<64;i++) if (side.board[i]) t += side.board[i].troops;
+  for (let i=0;i<HEX_SIZE;i++) if (side.board[i]) t += side.board[i].troops;
   return t;
 }
 
@@ -983,8 +1287,9 @@ function updateUI() {
 }
 
 function initFilters() {
-  ['catFilters','aiCatFilters'].forEach(id => {
+  ['catFilters','aiCatFilters','specCatFilters'].forEach(id => {
     const el = document.getElementById(id);
+    if (!el) return;
     el.innerHTML = '';
     const add = (label, cat) => {
       const btn = document.createElement('button');
@@ -994,7 +1299,8 @@ function initFilters() {
         el.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
         if (id==='catFilters') { playerCatFilter=cat; updateCollectionGrid(); }
-        else { aiCatFilter=cat; updateAiCollectionGrid(); }
+        else if (id==='aiCatFilters') { aiCatFilter=cat; updateAiCollectionGrid(); }
+        else { spectatorCatFilter=cat; updateSpectatorGrid(); }
       });
       el.appendChild(btn);
     };
@@ -1004,12 +1310,21 @@ function initFilters() {
 }
 
 function initSortBar() {
-  document.querySelectorAll('.sort-btn').forEach(btn => {
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('.sort-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      playerSortBy = btn.dataset.sort;
-      updateCollectionGrid();
+  const configs = [
+    { id: 'sortBar', setter: v => playerSortBy = v, update: updateCollectionGrid },
+    { id: 'aiSortBar', setter: v => aiSortBy = v, update: updateAiCollectionGrid },
+    { id: 'specSortBar', setter: v => spectatorSortBy = v, update: updateSpectatorGrid }
+  ];
+  configs.forEach(cfg => {
+    const bar = document.getElementById(cfg.id);
+    if (!bar) return;
+    bar.querySelectorAll('.sort-btn').forEach(btn => {
+      btn.addEventListener('click', ()=>{
+        bar.querySelectorAll('.sort-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        cfg.setter(btn.dataset.sort);
+        cfg.update();
+      });
     });
   });
 }
@@ -1299,11 +1614,79 @@ function pickBestOption(options) {
   return best.length === 1 ? best[0] : best[Math.floor(Math.random() * best.length)];
 }
 
+// ---- RPS (Rock-Paper-Scissors) for Tennozan ----
+function showRpsModal() {
+  if (_isAutoPlaying) return;
+  document.getElementById('rpsModal').classList.add('show');
+}
+
+async function submitRps(choice) {
+  try {
+    const data = await api.submitRps(gameId, choice);
+    applyStateFromServer(data);
+    document.getElementById('rpsModal').classList.remove('show');
+    if (gamePhase === 'rps_pick_flag' && rpsWinner === 'player') {
+      showTennozanFlagPickModal();
+    }
+  } catch (e) {
+    addBattleLog('石头剪刀布失败：' + e.message, 'lose');
+  }
+}
+
+// ---- Tennozan Flag Pick ----
+const TENNOZAN_FLAG_IDS = [6, 7];
+
+function showTennozanFlagPickModal() {
+  if (_isAutoPlaying) return;
+  const grid = document.getElementById('flagPickGrid');
+  grid.innerHTML = '';
+  // Fetch current options from spectator pool in the state
+  const opts = spectatorPool.filter(c => c.id === 6 || c.id === 7);
+  opts.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'pick-card';
+    const ratingColor = RATING_COLORS[c.rating] || '#aaa';
+    const typeColor = TYPE_COLORS[c.type] || '#aaa';
+    const total = c.leadership + c.martial + c.intelligence + c.politics;
+    const factionTags = getFactions(c).map(f => `<span style="font-size:9px;color:${FACTION_COLORS[f]||'#888'};background:rgba(0,0,0,.4);padding:0 4px;border-radius:3px">${f}</span>`).join(' ');
+    div.innerHTML = `
+      <img class="pc-avatar" src="${generateAvatar(c, 70)}" alt="${c.name}">
+      <div class="pc-name">${c.name} ${factionTags}</div>
+      <div class="pc-type" style="color:${typeColor}">${c.type}</div>
+      <div class="pc-rating" style="color:${ratingColor}">${c.rating}</div>
+      <div class="pc-stats">统${c.leadership} 武${c.martial} 智${c.intelligence} 政${c.politics}</div>
+      <div class="pc-total">总分 ${total}</div>
+      <div style="font-size:10px;color:#f5a623;margin-top:4px">🚩 天王山旗本</div>
+    `;
+    div.addEventListener('click', () => pickTennozanFlag(c.id));
+    grid.appendChild(div);
+  });
+  document.getElementById('flagPickModal').classList.add('show');
+}
+
+async function pickTennozanFlag(charId) {
+  try {
+    const data = await api.pickTennozanFlag(gameId, charId);
+    applyStateFromServer(data);
+    document.getElementById('flagPickModal').classList.remove('show');
+  } catch (e) {
+    addBattleLog('选择旗本失败：' + e.message, 'lose');
+  }
+}
+
 async function runAutoPlay() {
   if (!autoPlay) return;
   if (gamePhase === 'gameover') { toggleAutoPlay(); return; }
   try {
-    if (gamePhase === 'draw' || gamePhase === 'pick_card') {
+    if (gamePhase === 'rps') {
+      const choice = ['rock', 'paper', 'scissors'][Math.floor(Math.random() * 3)];
+      const data = await api.submitRps(gameId, choice);
+      applyStateFromServer(data);
+    } else if (gamePhase === 'rps_pick_flag' && rpsWinner === 'player') {
+      const pickId = spectatorPool.some(c => c.id === 6) ? 6 : 7;
+      const data = await api.pickTennozanFlag(gameId, pickId);
+      applyStateFromServer(data);
+    } else if (gamePhase === 'draw' || gamePhase === 'pick_card') {
       // Process ALL remaining draw steps for this round at once
       while (gamePhase === 'draw' || gamePhase === 'pick_card') {
         const data = await api.drawOptions(gameId);
@@ -1354,7 +1737,15 @@ async function autoPlayOneRound() {
   document.getElementById('btnEndTurn').disabled = true;
   try {
     while (gamePhase !== 'gameover') {
-      if (gamePhase === 'draw' || gamePhase === 'pick_card') {
+      if (gamePhase === 'rps') {
+        const choice = ['rock', 'paper', 'scissors'][Math.floor(Math.random() * 3)];
+        const data = await api.submitRps(gameId, choice);
+        applyStateFromServer(data);
+      } else if (gamePhase === 'rps_pick_flag' && rpsWinner === 'player') {
+        const pickId = spectatorPool.some(c => c.id === 6) ? 6 : 7;
+        const data = await api.pickTennozanFlag(gameId, pickId);
+        applyStateFromServer(data);
+      } else if (gamePhase === 'draw' || gamePhase === 'pick_card') {
         // Process ALL remaining draw steps for this round at once
         while (gamePhase === 'draw' || gamePhase === 'pick_card') {
           const data = await api.drawOptions(gameId);
@@ -1845,8 +2236,9 @@ async function autoMpDrawPick() {
   const gid = mpGameId;
   let phase = gamePhase;
   while (_isAutoPlaying && (
-    phase === 'multiplayer_draw_host' || phase === 'multiplayer_pick_host' ||
-    phase === 'multiplayer_draw_guest' || phase === 'multiplayer_pick_guest'
+    mpIsHost
+      ? (phase === 'multiplayer_draw_host' || phase === 'multiplayer_pick_host')
+      : (phase === 'multiplayer_draw_guest' || phase === 'multiplayer_pick_guest')
   )) {
     const data = mpIsHost ? await api.drawOptions(gid) : await api.drawOptionsGuest(gid);
     applyStateFromServer(data.state);
@@ -1979,6 +2371,10 @@ async function handleGuestTurn() {
     updateButtonStates();
     setTimeout(pollGuestTurn, 1000);
   } else if (gamePhase === 'idle' || gamePhase === 'draw') {
+    if (_isAutoPlaying) {
+      setTimeout(pollGuestTurn, 100);
+      return;
+    }
     setPhase('⏳ 等待对方抽卡...');
     setTimeout(pollGuestTurn, 1000);
   } else if (gamePhase === 'gameover') {
@@ -2491,7 +2887,7 @@ function openSettings() {
   const n = Math.floor(Math.random() * 3) + 1;
   const bg = document.createElement('div');
   bg.className = 'main-menu-bg';
-  bg.style.backgroundImage = `url(posters/${n}.webp)`;
+  bg.style.backgroundImage = `url(posters/${n}.webp?v=0.1.3)`;
   document.getElementById('mainMenu').insertBefore(bg, document.getElementById('mainMenu').firstChild);
   // Attempt autoplay (may be blocked by browser policy)
   MusicManager.play('menu');
@@ -2512,6 +2908,7 @@ async function startSinglePlayer() {
   document.getElementById('mainMenu').style.display = 'none';
   document.getElementById('gameHeader').style.display = 'flex';
   document.getElementById('gameContent').style.display = 'flex';
+  rebuildBoard(opts.terrain || 'normal');
   initBoard();
   initSortBar();
   initFilters();

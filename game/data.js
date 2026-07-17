@@ -1734,6 +1734,24 @@ const CHARACTERS = [
     "type": "全能"
   },
   {
+    "id": 103,
+    "name": "德川秀忠",
+    "leadership": 78,
+    "martial": 75,
+    "intelligence": 70,
+    "politics": 85,
+    "total_score": 308,
+    "rating": "C",
+    "wu_avg": 76.5,
+    "wen_avg": 77.5,
+    "max_stat": 85,
+    "wu_rating": "C",
+    "wen_rating": "D",
+    "total_rating": "B",
+    "type": "全能",
+    "identity": "大名"
+  },
+  {
     "id": 104,
     "name": "榊原康政",
     "leadership": 85,

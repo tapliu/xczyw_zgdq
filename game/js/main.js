@@ -114,6 +114,17 @@ const VISUAL_PLAYER_CELLS = [
   toIdx(-6,3), toIdx(-5,3),
 ].filter(i => i !== undefined);
 
+// Edge cells for zone border rendering
+const HEX_BOARD_EDGE = HEX_IDX_AXIAL.map((_, i) => i).filter(i => HEX_NEIGHBORS[i].length < 6);
+const ALL_FLAG_CELLS = new Set([...AI_FLAG_CELLS, ...PLAYER_FLAG_CELLS]);
+const HEX_FLAG_EDGE = HEX_IDX_AXIAL.map((_, i) => i).filter(i =>
+  ALL_FLAG_CELLS.has(i) && HEX_NEIGHBORS[i].some(ni => !ALL_FLAG_CELLS.has(ni))
+);
+const HEX_FRONT_SET = new Set(HEX_FRONT_CELLS);
+const HEX_FRONT_EDGE = HEX_FRONT_CELLS.filter(i =>
+  HEX_NEIGHBORS[i].some(ni => !HEX_FRONT_SET.has(ni))
+);
+
 // Cell spacing and visual size for rendering
 const HEX_CELL_SIZE = 50;
 const HEX_CELL_DRAW_SIZE = HEX_CELL_SIZE;
@@ -168,7 +179,7 @@ let round = 0, gamePhase = 'idle', drawPileCount = 100, placedThisTurn = 0;
 let player = { collection: [], board: Array(HEX_SIZE).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
 let ai = { collection: [], board: Array(HEX_SIZE).fill(null), troops: INIT_TROOPS, placed: 0, flagIdx: -1 };
 let selectedChar = null, selectedCell = null;
-let playerCatFilter = 'all', aiCatFilter = 'all', playerSortBy = 'default', aiSortBy = 'default', editorSortBy = 'id';
+let playerCatFilter = 'all', aiCatFilter = 'all', spectatorCatFilter = 'all', playerSortBy = 'default', aiSortBy = 'default', spectatorSortBy = 'default', editorSortBy = 'id';
 let avatarCache = {};
 let playerCooldowns = [], aiCooldowns = [];
 let firstScalerUid = null, firstScalerRound = null;
@@ -338,7 +349,7 @@ function generateAvatar(char, size) {
   if (avatarCache[key]) return avatarCache[key];
   // Use webp portrait when available
   const pid = char.avatarId || char.id;
-  if (pid >= 1 && pid <= 100 || pid >= 501 && pid <= 520) {
+  if (pid >= 1 && pid <= 105 || pid >= 501 && pid <= 520) {
     avatarCache[key] = 'portraits/' + pid + '.webp';
     return avatarCache[key];
   }
@@ -456,7 +467,11 @@ function initBoard() {
       if (z === 'ai-zone') z = 'player-zone';
       else if (z === 'player-zone') z = 'ai-zone';
     }
-    cell.className = 'cell ' + z + extra;
+    let cls = 'cell ' + z + extra;
+    if (HEX_BOARD_EDGE.includes(i)) cls += ' board-edge';
+    if (HEX_FLAG_EDGE.includes(i)) cls += ' flag-zone-edge';
+    if (HEX_FRONT_EDGE.includes(di)) cls += ' front-edge';
+    cell.className = cls;
     cell.dataset.index = i;
     cell.style.position = 'absolute';
     cell.style.left = (cx - HEX_CELL_DRAW_SIZE/2) + 'px';
@@ -516,7 +531,11 @@ function renderBoardFull() {
       if (z === 'ai-zone') z = 'player-zone';
       else if (z === 'player-zone') z = 'ai-zone';
     }
-    cell.className = 'cell ' + z + extra;
+    let cls = 'cell ' + z + extra;
+    if (HEX_BOARD_EDGE.includes(i)) cls += ' board-edge';
+    if (HEX_FLAG_EDGE.includes(i)) cls += ' flag-zone-edge';
+    if (HEX_FRONT_EDGE.includes(di)) cls += ' front-edge';
+    cell.className = cls;
     if (!isActiveCell(di)) cell.classList.add('inactive');
     let pu = player.board[di], au = ai.board[di];
     // In simultaneous multiplayer placement, hide only newly placed opponent units
@@ -543,11 +562,13 @@ function renderBoardFull() {
         const flagHtml = isFlag ? `<span class="u-flag-inner">${flagIcon(isPlayer ? '#ffd700' : '#4caf50')}</span>` : '';
         const factions = getFactions(u.char);
         const factionHtml = factions.length ? renderFactionBadges(factions, '/') : '';
-        cell.innerHTML = `<span class="u-power">${power}</span>
-          <span class="u-troops">${u.troops.toLocaleString()}</span>
-          <div class="u-avatar-wrap"><img class="u-avatar" src="${generateAvatar(u.char,14)}" alt="">${flagHtml}</div>
+        cell.innerHTML = `<div class="u-avatar-wrap"><img class="u-avatar" src="${generateAvatar(u.char,14)}" alt="">${flagHtml}</div>
           <span class="u-name">${u.char.name}</span>
-          <span class="u-faction">${factionHtml}</span>`;
+          <span class="u-faction">${factionHtml}</span>
+          <div class="u-stats-row">
+            <span class="u-power">战力:${power}</span>
+            <span class="u-troops">兵力:${u.troops.toLocaleString()}</span>
+          </div>`;
       }
     } else {
       if (selectedCell === i) cell.classList.add('highlight');
@@ -931,6 +952,7 @@ function updateAiCollectionGrid() {
   document.getElementById('aiDeployCount').textContent = `出阵武将：${deployed}  后备武将：${total-deployed}`;
   const enemyCooldowns = isGuestView() ? playerCooldowns : aiCooldowns;
   const enemyCatFilter = isGuestView() ? playerCatFilter : aiCatFilter;
+  const enemySortBy = isGuestView() ? playerSortBy : aiSortBy;
   if (!enemy.collection || !enemy.collection.length) { el.innerHTML=''; empty.style.display='block'; return; }
   empty.style.display='none';
   let filtered = [...enemy.collection];
@@ -949,6 +971,9 @@ function updateAiCollectionGrid() {
     const bGrp=bDead?3:(bCd?2:(bOn?1:0));
     if (aGrp!==bGrp) return aGrp-bGrp;
     if (aFg !== bFg) return aFg ? -1 : 1;
+    if (enemySortBy !== 'default') {
+      return (b[enemySortBy]||0) - (a[enemySortBy]||0);
+    }
     const ra=ratingOrder[a.rating]??9, rb=ratingOrder[b.rating]??9;
     if (ra!==rb) return ra-rb;
     return totalScore(b)-totalScore(a);
@@ -976,7 +1001,8 @@ function updateAiCollectionGrid() {
       : isFlagGen ? '<div class="freeze-badge" style="background:rgba(100,50,0,0.7);color:#f5a623">🚩</div>'
       : '';
     const factionTag = getFactions(c).map(f => `<span class="c-faction" style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('');
-    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div>${factionTag ? `<div class="cmeta">${factionTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
+    const showAttr = enemySortBy !== 'default' ? `<div class="cattr">${c[enemySortBy]}</div>` : `<div class="cattr">${cTotal}</div>`;
+    div.innerHTML = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${isFlagGen ? '🚩 ' : ''}${c.name}</div>${factionTag ? `<div class="cmeta">${factionTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}${showAttr}${flagBadge}${dead ? '<div class="dead-badge">死</div>' : onCooldown ? `<div class="freeze-badge ${cdRemaining.type==='scatter'?'scatter':''}">${cdRemaining.type==='scatter'?'溃':'❄'}${freezeRemaining}</div>` : ''}`;
     div.addEventListener('click', ()=> showCharDetail(c, onBoard, false));
     el.appendChild(div);
   });
@@ -986,25 +1012,30 @@ function updateAiCollectionGrid() {
 function updateSpectatorGrid() {
   const el = document.getElementById('spectatorGrid');
   const section = document.getElementById('spectatorSection');
-  const pSurvive = player.collection ? player.collection.filter(c => !isDead(c.id)).length : 0;
-  const canRecruit = pSurvive < 10;
   if (!spectatorPool || !spectatorPool.length) { section.style.display='none'; return; }
   section.style.display='block';
-  document.getElementById('specHint').textContent = canRecruit ? `己方存活${pSurvive}/10 · 点击招募` : `己方存活${pSurvive}/10`;
+  document.getElementById('specHint').textContent = `观战武将：${spectatorPool.length}`;
   el.innerHTML = '';
+  let filtered = [...spectatorPool];
+  if (spectatorCatFilter !== 'all') filtered = filtered.filter(c => c.type === spectatorCatFilter);
   const ratingOrder={ 'S+':0,'S':1,'A':2,'B':3,'C':4,'D':5 };
   const totalScore = ch => ch.leadership+ch.martial+ch.intelligence+ch.politics;
-  const sorted = [...spectatorPool].sort((a,b) => {
+  filtered.sort((a,b) => {
+    if (spectatorSortBy !== 'default') {
+      return (b[spectatorSortBy]||0) - (a[spectatorSortBy]||0);
+    }
     const ra=ratingOrder[a.rating]??9, rb=ratingOrder[b.rating]??9;
     if (ra!==rb) return ra-rb;
     return totalScore(b)-totalScore(a);
   });
-  sorted.forEach(c => {
+  const canRecruit = (player.collection ? player.collection.filter(c => !isDead(c.id)).length : 0) < 10;
+  filtered.forEach(c => {
     const div = document.createElement('div');
     div.className = 'char-card';
     const cTotal = c.leadership + c.martial + c.intelligence + c.politics;
     const fTag = getFactions(c).map(f => `<span style="color:${FACTION_COLORS[f]||'#888'}">${f}</span>`).join('/');
-    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div>${fTag ? `<div class="cmeta">${fTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}<div class="cattr">${cTotal}</div>`;
+    const showAttr = spectatorSortBy !== 'default' ? `<div class="cattr">${c[spectatorSortBy]}</div>` : `<div class="cattr">${cTotal}</div>`;
+    let html = `<img class="cc-avatar" src="${generateAvatar(c,38)}"><div class="cname">${c.name}</div>${fTag ? `<div class="cmeta">${fTag}</div>` : ''}<div class="cmeta">${c.type||''} · ${c.rating||''}${c.identity?' · '+c.identity:''}</div>${miniAttrBars(c)}${showAttr}`;
     if (canRecruit) { html += '<div style="font-size:9px;color:#4caf50;text-align:center;cursor:pointer">招募</div>'; }
     div.innerHTML = html;
     div.addEventListener('click', (e) => {
@@ -1205,8 +1236,9 @@ function updateUI() {
 }
 
 function initFilters() {
-  ['catFilters','aiCatFilters'].forEach(id => {
+  ['catFilters','aiCatFilters','specCatFilters'].forEach(id => {
     const el = document.getElementById(id);
+    if (!el) return;
     el.innerHTML = '';
     const add = (label, cat) => {
       const btn = document.createElement('button');
@@ -1216,7 +1248,8 @@ function initFilters() {
         el.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
         if (id==='catFilters') { playerCatFilter=cat; updateCollectionGrid(); }
-        else { aiCatFilter=cat; updateAiCollectionGrid(); }
+        else if (id==='aiCatFilters') { aiCatFilter=cat; updateAiCollectionGrid(); }
+        else { spectatorCatFilter=cat; updateSpectatorGrid(); }
       });
       el.appendChild(btn);
     };
@@ -1226,12 +1259,21 @@ function initFilters() {
 }
 
 function initSortBar() {
-  document.querySelectorAll('.sort-btn').forEach(btn => {
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('.sort-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      playerSortBy = btn.dataset.sort;
-      updateCollectionGrid();
+  const configs = [
+    { id: 'sortBar', setter: v => playerSortBy = v, update: updateCollectionGrid },
+    { id: 'aiSortBar', setter: v => aiSortBy = v, update: updateAiCollectionGrid },
+    { id: 'specSortBar', setter: v => spectatorSortBy = v, update: updateSpectatorGrid }
+  ];
+  configs.forEach(cfg => {
+    const bar = document.getElementById(cfg.id);
+    if (!bar) return;
+    bar.querySelectorAll('.sort-btn').forEach(btn => {
+      btn.addEventListener('click', ()=>{
+        bar.querySelectorAll('.sort-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        cfg.setter(btn.dataset.sort);
+        cfg.update();
+      });
     });
   });
 }

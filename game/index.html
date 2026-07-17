@@ -94,20 +94,34 @@
 <div id="emptyTip">抽卡后武将将显示在这里</div>
 </div>
 
-<div class="section">
-<div class="sec-hdr">
-<h3>👹 敌方武将</h3>
-<span id="aiDeployCount" style="font-size:11px;color:#888;margin-left:4px"></span>
-<div class="cat-filters" id="aiCatFilters"></div>
-</div>
-<div class="col-grid" id="aiCollectionGrid"></div>
-<div id="aiEmptyTip" style="text-align:center;padding:8px;color:#555;font-size:11px">-</div>
-</div>
+    <div class="section">
+      <div class="sec-hdr">
+        <h3>👹 敌方武将</h3>
+        <span id="aiDeployCount" style="font-size:11px;color:#888;margin-left:4px"></span>
+        <div class="cat-filters" id="aiCatFilters"></div>
+      </div>
+      <div class="sort-bar" id="aiSortBar">
+        <button class="sort-btn active" data-sort="default">默认</button>
+        <button class="sort-btn" data-sort="leadership">统率</button>
+        <button class="sort-btn" data-sort="martial">武力</button>
+        <button class="sort-btn" data-sort="intelligence">智力</button>
+        <button class="sort-btn" data-sort="politics">政治</button>
+      </div>
+      <div class="col-grid" id="aiCollectionGrid"></div>
+      <div id="aiEmptyTip" style="text-align:center;padding:8px;color:#555;font-size:11px">-</div>
+    </div>
 
-<div class="section" id="spectatorSection" style="display:none">
-<div class="sec-hdr"><h3>👀 观战席</h3><span id="specHint" style="font-size:10px;color:#888">可招募</span></div>
-<div class="col-grid" id="spectatorGrid"></div>
-</div>
+    <div class="section" id="spectatorSection" style="display:none">
+      <div class="sec-hdr"><h3>👀 观战席</h3><span id="specHint" style="font-size:10px;color:#888;flex:1;text-align:center"></span><div class="cat-filters" id="specCatFilters"></div></div>
+      <div class="sort-bar" id="specSortBar">
+        <button class="sort-btn active" data-sort="default">默认</button>
+        <button class="sort-btn" data-sort="leadership">统率</button>
+        <button class="sort-btn" data-sort="martial">武力</button>
+        <button class="sort-btn" data-sort="intelligence">智力</button>
+        <button class="sort-btn" data-sort="politics">政治</button>
+      </div>
+      <div class="col-grid" id="spectatorGrid"></div>
+    </div>
 </div>
 </div>
 

@@ -71,6 +71,10 @@ header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webk
 .cell.highlight{box-shadow:0 0 10px rgba(245,166,35,.5)!important;border-color:#f5a623!important}
 .cell.player-flag-zone{background:rgba(255,215,0,.2)}
 .cell.ai-flag-zone{background:rgba(255,215,0,.2)}
+/* Zone border edges — priority: white > gold > green (by CSS order) */
+.cell.front-edge{border-color:#4caf50}
+.cell.flag-zone-edge{border-color:#ffd700}
+.cell.board-edge{border-color:#fff}
 .cell.battle-flash{animation:battleFlash .4s}
 @keyframes battleFlash{0%,100%{border-color:#e94560}50%{border-color:#fff;box-shadow:0 0 20px #e94560}}
 @keyframes slideIn{from{transform:translateY(-16px);opacity:0}to{transform:translateY(0);opacity:1}}
@@ -94,18 +98,21 @@ header h1{font-size:18px;background:linear-gradient(90deg,#e94560,#f5a623);-webk
 .cell.has-ai .u-power{color:#ef5350}
 
 /* Single unit layout */
-.cell .u-power{position:absolute;top:15px;left:7px;font-size:4px;font-weight:700;line-height:1;color:#f5a623;text-shadow:0 0 4px rgba(0,0,0,.8);transform:rotate(-60deg);transform-origin:left center}
-.cell.has-player .u-power{color:#4fc3f7}
-.cell.has-ai .u-power{color:#ef5350}
-.cell .u-troops{position:absolute;top:19px;right:5px;font-size:4px;font-weight:700;line-height:1;text-shadow:0 0 4px rgba(0,0,0,.8);transform:rotate(60deg);transform-origin:right center}
-.cell.has-player .u-troops{color:#4fc3f7}
-.cell.has-ai .u-troops{color:#ef5350}
-.cell .u-avatar-wrap{display:flex;align-items:center;justify-content:center;gap:1px;margin-top:18px}
+.cell .u-avatar-wrap{display:flex;align-items:center;justify-content:center;gap:1px;margin-top:8px}
 .cell .u-flag-inner{line-height:0;flex-shrink:0}
 .cell .u-flag-inner svg{width:8px;height:8px;filter:drop-shadow(0 0 3px rgba(0,0,0,.5))}
 .cell .u-avatar{width:14px;height:14px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.2)}
-.cell .u-name{font-size:5px;font-weight:600;color:#ddd;line-height:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:0;max-width:40px}
-.cell .u-faction{font-size:4px;color:#999;line-height:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40px}
+.cell .u-name{font-size:5px;font-weight:600;color:#ddd;line-height:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px;max-width:40px}
+.cell .u-faction{font-size:4px;color:#999;line-height:1.1;text-align:center;margin-top:1px;max-width:36px;white-space:normal;word-wrap:break-word;overflow-wrap:break-word}
+.cell .u-stats-row{display:flex;width:100%;justify-content:space-between;padding:0 7px;margin-top:2px;box-sizing:border-box}
+.cell .u-stats-row .u-power,
+.cell .u-stats-row .u-troops{font-size:3px;font-weight:700;line-height:1;text-shadow:0 0 4px rgba(0,0,0,.8)}
+.cell .u-stats-row .u-power{color:#f5a623}
+.cell .u-stats-row .u-troops{color:#f5a623}
+.cell.has-player .u-stats-row .u-power,
+.cell.has-player .u-stats-row .u-troops{color:#4fc3f7}
+.cell.has-ai .u-stats-row .u-power,
+.cell.has-ai .u-stats-row .u-troops{color:#ef5350}
 .cell.has-player.flag-cell{border-color:#ffd700}
 .cell.has-ai.flag-cell{border-color:#4caf50}
 .cell.has-player.flag-cell .u-avatar{border-color:#ffd700!important;box-shadow:0 0 8px rgba(255,215,0,.6)}
